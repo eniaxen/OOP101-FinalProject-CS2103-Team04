@@ -333,6 +333,16 @@ public class GameScreen implements Screen {
             }
         }
 
+        // ---- Level 5 bridge runtime collision patch ----
+        // Tiles (43,37) and (47,37) have decorative 'walls details' (id 61) over walkable floor,
+        // which blocked the 1-tile bridge connecting the west and east chambers of Level 5.
+        for (int bx = 43; bx <= 47; bx++) {
+            if (bx < mapWidth && 37 < mapHeight) {
+                floor[bx][37] = true;
+                wall[bx][37] = false;
+            }
+        }
+
         // Clear static wall collision on door cells; the Door objects handle blocking until opened.
         for (Door d : doors) {
             int x0 = (int) (d.x / TILE);
@@ -476,7 +486,7 @@ public class GameScreen implements Screen {
     }
 
     private boolean canStand(float x, float y) {
-        return canStand(x, y, 6f);
+        return canStand(x, y, 4.5f);
     }
 
     private boolean canStand(float x, float y, float r) {
