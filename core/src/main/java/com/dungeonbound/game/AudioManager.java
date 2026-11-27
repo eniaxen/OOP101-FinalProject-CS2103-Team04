@@ -326,6 +326,48 @@ public class AudioManager {
         playSfx("audio/sfx_wiki_card_select.ogg", 0.75f);
     }
 
+    // --------------------------------------------------- Gameplay SFX helpers
+
+    public void playFootstep() {
+        playSfx("audio/sfx_footstep.wav", 0.45f);
+    }
+
+    public void playSwordSwing() {
+        playSfx("audio/sfx_sword_swing.wav", 0.8f);
+    }
+
+    public void playEnemyHit() {
+        playSfx("audio/sfx_enemy_hit.wav", 0.75f);
+    }
+
+    public void playEnemyDie() {
+        playSfx("audio/sfx_enemy_die.wav", 0.8f);
+    }
+
+    public void playEnemyAlert() {
+        playSfx("audio/sfx_enemy_alert.wav", 0.7f);
+    }
+
+    public void playPlayerHurt() {
+        playSfx("audio/sfx_player_hurt.wav", 0.85f);
+    }
+
+    public void playDoorOpen() {
+        playSfx("audio/sfx_door_open.wav", 0.75f);
+    }
+
+    public void playLevelUp() {
+        playSfx("audio/sfx_level_up.wav", 0.9f);
+    }
+
+    public void playGameOver() {
+        playSfx("audio/sfx_game_over.wav", 0.9f);
+    }
+
+    public void playVictory() {
+        playSfx("audio/sfx_victory.wav", 1.0f);
+    }
+
     // ----------------------------------------------------------------- Update
 
     /**

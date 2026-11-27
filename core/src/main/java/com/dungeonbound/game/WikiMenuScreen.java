@@ -53,10 +53,11 @@ public class WikiMenuScreen implements Screen {
     private static final boolean DEBUG_KEYS = false;
 
     /** Para sa testing lang: double click sa locked card = i-unlock agad (saved). Gawing false sa release. */
-    private static final boolean DEBUG_DOUBLE_CLICK_UNLOCK = true;
+    private static final boolean DEBUG_DOUBLE_CLICK_UNLOCK = false;
 
     // ====== STATE ======
     private final Game game;
+    private final Runnable onExit;
     private final Stage stage = new Stage(new FitViewport(W, H));
     private final Map<String, Texture> textures = new HashMap<>();
     private TextureAtlas atlas;
@@ -75,13 +76,19 @@ public class WikiMenuScreen implements Screen {
     private int target;        // unang card ng window na pupuntahan
     private int focus;         // piniling card (keyboard / mouse)
     private float scrollPos;   // kasalukuyang (animated) posisyon ng window
+    private boolean initialized;
     private boolean disposed;
 
-    public WikiMenuScreen(Game game) { this(game, 0); }
+    public WikiMenuScreen(Game game) { this(game, 0, null); }
 
     /** @param focusIndex balik dito galing LoreScreen para parehong card ang naka-focus */
     public WikiMenuScreen(Game game, int focusIndex) {
+        this(game, focusIndex, null);
+    }
+
+    public WikiMenuScreen(Game game, int focusIndex, Runnable onExit) {
         this.game = game;
+        this.onExit = onExit;
         this.focus = MathUtils.clamp(focusIndex, 0, count - 1);
         this.target = MathUtils.clamp(focus - (VISIBLE - 1), 0, maxTarget);
         this.scrollPos = target;
@@ -90,6 +97,8 @@ public class WikiMenuScreen implements Screen {
     @Override
     public void show() {
         Gdx.input.setInputProcessor(stage);
+        if (initialized) return;
+        initialized = true;
 
         stage.addListener(new InputListener() {
             @Override
@@ -233,7 +242,7 @@ public class WikiMenuScreen implements Screen {
             return;
         }
         AudioManager.getInstance().playWikiCardSelect();
-        goTo(new LoreScreen(game, idx));
+        goTo(new LoreScreen(game, idx, onExit));
     }
 
     /** TEST ONLY: i-unlock ang card at palitan agad ang itsura (hindi na kailangan mag-reload). */
@@ -246,7 +255,12 @@ public class WikiMenuScreen implements Screen {
 
     private void exitToMenu() {
         AudioManager.getInstance().playBtnDeselect();
-        goTo(new StartMenuScreen(game));
+        if (onExit != null) {
+            onExit.run();
+            Gdx.app.postRunnable(this::dispose);
+        } else {
+            goTo(new StartMenuScreen(game));
+        }
     }
 
     private void goTo(Screen next) {
