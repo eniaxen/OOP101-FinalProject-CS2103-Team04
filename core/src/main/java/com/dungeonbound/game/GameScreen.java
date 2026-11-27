@@ -49,7 +49,7 @@ public class GameScreen implements Screen {
     private static final String[] KEYS = {"tiyanak", "aswang", "tikbalang", "manananggal", "kapre"};
     private static final int[][] AREAS = {
         {10, 7, 20, 15},   // smallest starting chamber
-        {25, 4, 27, 17},   // upper hall
+        {25, 6, 17, 7},    // upper hall (main connected room only)
         {21, 19, 22, 15},  // west middle chamber
         {34, 19, 35, 12},  // east middle chamber
         {20, 30, 49, 16}   // large lower chamber
@@ -57,9 +57,9 @@ public class GameScreen implements Screen {
     private static final int[][] SPAWNS = {{15, 15}, {39, 10}, {28, 25}, {50, 24}, {34, 38}};
     private static final int[][][] ENEMY_SPAWNS = {
         {{12, 11}, {17, 12}, {17, 18}},
-        {{27, 9}, {38, 8},  {40, 10}, {48, 12}},   // (35,12) was in wall → moved to (38,8)
+        {{27, 9}, {38, 8}, {40, 10}, {33, 9}},   // all 4 in main connected upper hall
         {{24, 24}, {28, 23}, {30, 24}},
-        {{39, 24}, {45, 22}, {48, 25}, {42, 26}},   // (64,23) was in void → moved to (42,26)
+        {{39, 24}, {45, 22}, {48, 25}, {42, 26}},
         {{25, 36}, {34, 40}, {39, 35}, {54, 40}, {63, 36}}
     };
 
@@ -320,19 +320,6 @@ public class GameScreen implements Screen {
             drawTiles.addAll(parsedLayers.get(li));
         }
 
-        // ---- Level 3 bridge runtime collision patch ----
-        // The corridor x=29..39, y=17..20 is void in map.json but visually connects the
-        // west middle chamber to the Manananggal doors at x=40..41 and x=44..45.
-        // Extending to x=29..41 ensures no gap between the patched area and the door cells.
-        for (int bx = 29; bx <= 41; bx++) {
-            for (int by = 17; by <= 20; by++) {
-                if (bx >= 0 && by >= 0 && bx < mapWidth && by < mapHeight) {
-                    floor[bx][by] = true;
-                    wall[bx][by] = false;
-                }
-            }
-        }
-
         // Clear static wall collision on door cells; the Door objects handle blocking until opened.
         for (Door d : doors) {
             int x0 = (int) (d.x / TILE);
@@ -467,12 +454,23 @@ public class GameScreen implements Screen {
         return false;
     }
 
-    private boolean canStand(float x, float y) {
+    private boolean isWalkablePoint(float x, float y) {
         int tx = (int) Math.floor(x / TILE);
         int ty = (int) Math.floor(y / TILE);
         if (tx < 0 || ty < 0 || tx >= mapWidth || ty >= mapHeight) return false;
         if (!floor[tx][ty] || wall[tx][ty]) return false;
         return !inDoor(x, y);
+    }
+
+    private boolean canStand(float x, float y) {
+        return canStand(x, y, 6f);
+    }
+
+    private boolean canStand(float x, float y, float r) {
+        return isWalkablePoint(x - r, y - r)
+            && isWalkablePoint(x + r, y - r)
+            && isWalkablePoint(x - r, y + r)
+            && isWalkablePoint(x + r, y + r);
     }
 
     private int[] nearestWalkable(int tx, int ty) {
@@ -707,19 +705,19 @@ public class GameScreen implements Screen {
                     float vy = (py - e.y) / (float) dist;
                     float nx = e.x + vx * enemySpeed;
                     float ny = e.y + vy * enemySpeed;
-                    if (canStand(nx, ny)) {
+                    if (canStand(nx, ny, 7f)) {
                         // Full diagonal move is clear
                         e.x = nx;
                         e.y = ny;
-                    } else if (canStand(nx, e.y)) {
+                    } else if (canStand(nx, e.y, 7f)) {
                         // Wall-slide: horizontal only
                         e.x = nx;
-                    } else if (canStand(e.x, ny)) {
+                    } else if (canStand(e.x, ny, 7f)) {
                         // Wall-slide: vertical only
                         e.y = ny;
                     }
                     // Safety: if enemy somehow drifted into a non-walkable tile, nudge back
-                    if (!canStand(e.x, e.y)) {
+                    if (!canStand(e.x, e.y, 6f)) {
                         int[] safe = nearestWalkable((int)(e.x / TILE), (int)(e.y / TILE));
                         e.x = safe[0] * TILE + 8f;
                         e.y = safe[1] * TILE + 8f;
