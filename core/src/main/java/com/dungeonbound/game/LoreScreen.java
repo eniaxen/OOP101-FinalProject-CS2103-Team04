@@ -68,22 +68,31 @@ public class LoreScreen implements Screen {
 
     private final Game game;
     private final int index;
+    private final Runnable onExit;
     private final Stage stage = new Stage(new FitViewport(W, H));
     private TextureAtlas atlas;
     private boolean ownsAtlas;
     private final List<Texture> textures = new ArrayList<>();
     private final List<BitmapFont> fonts = new ArrayList<>();
     private Texture whiteTex;
+    private boolean initialized;
     private boolean disposed;
 
     public LoreScreen(Game game, int index) {
+        this(game, index, null);
+    }
+
+    public LoreScreen(Game game, int index, Runnable onExit) {
         this.game = game;
         this.index = index;
+        this.onExit = onExit;
     }
 
     @Override
     public void show() {
         Gdx.input.setInputProcessor(stage);
+        if (initialized) return;
+        initialized = true;
         WikiCreature c = WikiCreature.ALL.get(index);
 
         stage.addListener(new InputListener() {
@@ -224,7 +233,7 @@ public class LoreScreen implements Screen {
 
     private void back() {
         AudioManager.getInstance().playBtnDeselect();
-        goTo(new WikiMenuScreen(game, index));
+        goTo(new WikiMenuScreen(game, index, onExit));
     }
 
     /** Lipat sa kalapit na unlocked na creature (walang wrap). */
@@ -232,7 +241,7 @@ public class LoreScreen implements Screen {
         for (int i = index + dir; i >= 0 && i < WikiCreature.ALL.size(); i += dir) {
             if (WikiProgress.isUnlocked(WikiCreature.ALL.get(i).id)) {
                 AudioManager.getInstance().playWikiCardHover();
-                goTo(new LoreScreen(game, i));
+                goTo(new LoreScreen(game, i, onExit));
                 return;
             }
         }

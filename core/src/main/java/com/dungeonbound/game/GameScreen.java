@@ -295,13 +295,17 @@ public class GameScreen implements Screen {
             boolean isTraps = name.trim().equalsIgnoreCase("traps");
             boolean isBaseFloor = name.equalsIgnoreCase("New layer");
             boolean isDoorLayer = name.equalsIgnoreCase("door wall open");
+            boolean isDoorDetailsLayer = name.trim().equalsIgnoreCase("details wall/ doors");
 
             JsonValue tiles = layer.get("tiles");
             for (JsonValue tile = tiles.child; tile != null; tile = tile.next) {
                 int id = tile.getInt("id");
                 int x = tile.getInt("x");
                 int y = tile.getInt("y");
-                layerTiles.add(new Tile(id, x, y));
+                boolean skipStaticDoorFrame = (isDoorLayer || isDoorDetailsLayer) && isStaticDoorFrameTile(id);
+                if (!skipStaticDoorFrame) {
+                    layerTiles.add(new Tile(id, x, y));
+                }
 
                 if (x >= 0 && y >= 0 && x < mapWidth && y < mapHeight) {
                     if (solid) wall[x][y] = true;
@@ -364,6 +368,11 @@ public class GameScreen implements Screen {
             || s.equals("wall horizontal")
             || s.trim().equals("walls details")
             || s.trim().equals("details wall/ doors");
+    }
+
+    private static boolean isStaticDoorFrameTile(int id) {
+        return id == 78 || id == 79 || id == 80 || id == 83 || id == 84 || id == 87 || id == 88
+            || id == 162 || id == 163 || id == 164 || id == 165;
     }
 
     private void loadPlayer() {
@@ -429,7 +438,7 @@ public class GameScreen implements Screen {
     private void spawnEnemy(String type, int preferredX, int preferredY, boolean reinforcement) {
         int sx = -1, sy = -1;
         if (!reinforcement) {
-            int[] safe = nearestWalkable(preferredX, preferredY);
+            int[] safe = nearestWalkable(preferredX, preferredY, 7f);
             sx = safe[0];
             sy = safe[1];
         } else {
@@ -443,7 +452,7 @@ public class GameScreen implements Screen {
                 int y = minY + random.nextInt(Math.max(1, maxY - minY + 1));
                 float wx = x * TILE + 8f;
                 float wy = y * TILE + 8f;
-                if (!canStand(wx, wy) || Math.hypot(wx - px, wy - py) < 100.0) continue;
+                if (!canStand(wx, wy, 7f) || Math.hypot(wx - px, wy - py) < 100.0) continue;
                 boolean crowded = false;
                 for (Enemy other : enemies) {
                     if (Math.hypot(wx - other.x, wy - other.y) < 48.0) {
@@ -458,7 +467,7 @@ public class GameScreen implements Screen {
                 }
             }
             if (sx < 0) {
-                int[] safe = nearestWalkable(SPAWNS[level][0] + 3, SPAWNS[level][1] + 3);
+                int[] safe = nearestWalkable(SPAWNS[level][0] + 3, SPAWNS[level][1] + 3, 7f);
                 sx = safe[0];
                 sy = safe[1];
             }
@@ -497,6 +506,10 @@ public class GameScreen implements Screen {
     }
 
     private int[] nearestWalkable(int tx, int ty) {
+        return nearestWalkable(tx, ty, 4.5f);
+    }
+
+    private int[] nearestWalkable(int tx, int ty, float radius) {
         int[] area = AREAS[level];
         int bestX = tx, bestY = ty;
         double best = Double.MAX_VALUE;
@@ -508,7 +521,7 @@ public class GameScreen implements Screen {
             for (int x = minX; x <= maxX; x++) {
                 float cx = x * TILE + 8f;
                 float cy = y * TILE + 8f;
-                if (canStand(cx, cy)) {
+                if (canStand(cx, cy, radius)) {
                     double d = (x - tx) * (double) (x - tx) + (y - ty) * (double) (y - ty);
                     if (d < best) {
                         best = d;
@@ -550,6 +563,28 @@ public class GameScreen implements Screen {
     }
 
     private void updateGame(float dt) {
+        if (gameOver || gameWon) {
+            if (Gdx.input.isKeyJustPressed(Keys.ESCAPE)) {
+                openPauseMenu();
+                return;
+            }
+            if (Gdx.input.isKeyJustPressed(Keys.R)) {
+                pendingEnemyReinforcements.clear();
+                defeatedThisLevel.clear();
+                reinforcementsInCurrentLevel = 0;
+                playerHp = 100f;
+                playerMp = playerMaxMp;
+                fireCooldown = 0f;
+                fireballs.clear();
+                gameWon = false;
+                gameOver = false;
+                gameOverSoundPlayed = false;
+                victorySoundPlayed = false;
+                beginLevel(0);
+            }
+            return;
+        }
+
         boolean inventoryWasOpen = inventory.isOpen();
         inventory.update(hudViewport);  // I / tap the bag opens it; ESC closes it
         if (Gdx.input.isKeyJustPressed(Keys.ESCAPE) && !inventoryWasOpen) {
@@ -567,24 +602,6 @@ public class GameScreen implements Screen {
         if (inventory.isOpen()) { // the game waits while the inventory is open
             buttons.pollSword();   // throw away taps made on the buttons meanwhile
             buttons.pollFire();
-            return;
-        }
-
-        if (gameOver || gameWon) {
-            if (Gdx.input.isKeyJustPressed(Keys.R)) {
-                pendingEnemyReinforcements.clear();
-                defeatedThisLevel.clear();
-                reinforcementsInCurrentLevel = 0;
-                playerHp = 100f;
-                playerMp = playerMaxMp;
-                fireCooldown = 0f;
-                fireballs.clear();
-                gameWon = false;
-                gameOver = false;
-                gameOverSoundPlayed = false;
-                victorySoundPlayed = false;
-                beginLevel(0);
-            }
             return;
         }
 
@@ -676,7 +693,7 @@ public class GameScreen implements Screen {
             double best = 64.0;
             for (Door d : doors) {
                 double dist = Math.hypot(d.x + d.w / 2f - px, d.y + d.h / 2f - py);
-                if (dist < best && d.open < 1f) {
+                if (dist < best && !d.opening && d.open < 1f) {
                     best = dist;
                     nearest = d;
                 }
@@ -741,7 +758,7 @@ public class GameScreen implements Screen {
                     }
                     // Safety: if enemy somehow drifted into a non-walkable tile, nudge back
                     if (!canStand(e.x, e.y, 6f)) {
-                        int[] safe = nearestWalkable((int)(e.x / TILE), (int)(e.y / TILE));
+                        int[] safe = nearestWalkable((int)(e.x / TILE), (int)(e.y / TILE), 7f);
                         e.x = safe[0] * TILE + 8f;
                         e.y = safe[1] * TILE + 8f;
                     }
@@ -768,7 +785,7 @@ public class GameScreen implements Screen {
         }
 
         enemies.removeIf(e -> e.dead);
-        if (enemies.isEmpty()) {
+        if (!gameOver && enemies.isEmpty()) {
             if (level < TYPES.length - 1) {
                 pendingEnemyReinforcements.addAll(defeatedThisLevel);
                 AudioManager.getInstance().playLevelUp();
@@ -811,7 +828,7 @@ public class GameScreen implements Screen {
                     inventory.openPanel();
                     db.setScreen(this, false);
                 },
-                () -> db.setScreen(this, false),
+                () -> db.setScreen(new WikiMenuScreen(db, 0, this::openPauseMenu)),
                 () -> {
                     dispose();
                     db.setScreen(new StartMenuScreen(db));
@@ -892,7 +909,11 @@ public class GameScreen implements Screen {
 
         for (Door d : doors) {
             int idx = Math.min(doorFrames.length - 1, (int) (d.open * (doorFrames.length - 1) + 0.0001f));
-            batch.draw(doorFrames[idx], d.x, toWorldY(d.y, 57f), 48f, 57f);
+            float dw = 56f;
+            float dh = dw * (113f / 95f);
+            float dx = d.x + TILE - dw / 2f;
+            float dyTop = d.y - dh * (18f / 113f);
+            batch.draw(doorFrames[idx], dx, toWorldY(dyTop, dh), dw, dh);
         }
 
         for (Enemy e : enemies) {
@@ -943,7 +964,9 @@ public class GameScreen implements Screen {
         TextureRegion[] pAnim = playerAttackTime > 0f
             ? playerFrames.get(facing == 2 ? "swordLeft" : "swordRight")
             : playerFrames.get(facing == 0 ? "up" : facing == 1 ? "down" : facing == 2 ? "left" : "right");
-        TextureRegion pFrame = getAnimFrame(pAnim, playerAnimTime, 10f);
+        float pTime = playerAttackTime > 0f ? Math.max(0f, 0.42f - playerAttackTime) : playerAnimTime;
+        float pFps = playerAttackTime > 0f ? 14f : 10f;
+        TextureRegion pFrame = getAnimFrame(pAnim, pTime, pFps);
         if (pFrame != null) {
             float pw = playerAttackTime > 0f ? 50f : (facing == 1 ? 38f : 34f);
             float ph = playerAttackTime > 0f ? 50f : (facing == 1 ? 54f : 46f);
