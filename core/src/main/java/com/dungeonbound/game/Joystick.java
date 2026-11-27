@@ -21,6 +21,10 @@ public class Joystick {
         center.set(margin + radius, margin + radius);
     }
 
+    public float getCenterX() { return center.x; }
+    public float getCenterY() { return center.y; }
+    public float getRadius() { return radius; }
+
     /** Reads touch input. Returns direction in knob (x, y), each -1..1, y up. */
     public Vector2 update(Viewport hud) {
         if (pointer == -1) {

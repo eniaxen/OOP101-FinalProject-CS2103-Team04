@@ -4,6 +4,7 @@ import com.badlogic.gdx.Game;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input.Keys;
 import com.badlogic.gdx.InputAdapter;
+import com.badlogic.gdx.InputMultiplexer;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.assets.AssetManager;
 import com.badlogic.gdx.graphics.Color;
@@ -18,6 +19,8 @@ import com.badlogic.gdx.graphics.g2d.TextureAtlas;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGenerator;
 import com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGenerator.FreeTypeFontParameter;
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.JsonReader;
 import com.badlogic.gdx.utils.JsonValue;
@@ -155,6 +158,46 @@ public class GameScreen implements Screen {
     private boolean gameOver = false;
     private boolean disposed = false;
 
+    // ---- touch controls, profile HUD, inventory, fireballs ----
+    private static final float FIRE_COOLDOWN = 0.7f;  // seconds between fireballs
+    private static final float FIRE_MP_COST = 10f;
+    private static final float FIRE_DAMAGE = 30f;     // the sword does 42
+    private static final float MP_REGEN = 2f;         // MP per second
+
+    private final ShapeRenderer shape = new ShapeRenderer();
+    private final Joystick joystick = new Joystick();
+    private ActionButtons buttons;
+    private Fireballs fireballs;
+    private Inventory inventory;
+    private PlayerHud playerHud;
+    private BitmapFont uiFont;          // font of the profile HUD and the inventory (has the peso sign)
+    private TextureRegion portrait;     // face shown in the profile picture
+    private float playerMp = 50f;
+    private final float playerMaxMp = 50f;
+    private int pesos = 100;            // money, shown as the peso sign in the HUD
+    private float fireCooldown = 0f;
+    private float aimX = 1f, aimY = 0f; // direction the next fireball flies (y grows downward)
+
+    /** Tells the fireballs about walls and enemies. */
+    private final Fireballs.World fireWorld = new Fireballs.World() {
+        @Override
+        public boolean isBlocked(float x, float y) {
+            return !canStand(x, y);
+        }
+
+        @Override
+        public boolean hitEnemy(float x, float y) {
+            for (Enemy e : enemies) {
+                if (e.dead || e.dying) continue;
+                if (Math.hypot(e.x - x, e.y - y) < 20.0) {
+                    damageEnemy(e, FIRE_DAMAGE);
+                    return true;
+                }
+            }
+            return false;
+        }
+    };
+
     public GameScreen(Game game, AssetManager assets) {
         this.game = game;
         this.assets = assets;
@@ -189,6 +232,13 @@ public class GameScreen implements Screen {
         loadMap();
         loadPlayer();
         beginLevel(0);
+
+        uiFont = HudStyle.createFont();
+        playerHud = new PlayerHud(uiFont);
+        inventory = new Inventory(uiFont);
+        buttons = new ActionButtons(hudViewport);
+        fireballs = new Fireballs();
+        portrait = new TextureRegion(playerFrames.get("down")[0], 22, 28, 56, 56); // head and shoulders
     }
 
     private BitmapFont createFont(int size) {
@@ -324,6 +374,7 @@ public class GameScreen implements Screen {
 
     private void beginLevel(int n) {
         level = n;
+        if (fireballs != null) fireballs.clear();
         enemies.clear();
         defeatedThisLevel.clear();
         for (Door d : doors) {
@@ -460,7 +511,9 @@ public class GameScreen implements Screen {
     }
 
     private void updateGame(float dt) {
-        if (Gdx.input.isKeyJustPressed(Keys.ESCAPE)) {
+        boolean inventoryWasOpen = inventory.isOpen();
+        inventory.update(hudViewport);  // I / tap the bag opens it; ESC closes it
+        if (Gdx.input.isKeyJustPressed(Keys.ESCAPE) && !inventoryWasOpen) {
             openPauseMenu();
             return;
         }
@@ -472,12 +525,21 @@ public class GameScreen implements Screen {
             setZoom(zoom / 1.12f);
         }
 
+        if (inventory.isOpen()) { // the game waits while the inventory is open
+            buttons.pollSword();   // throw away taps made on the buttons meanwhile
+            buttons.pollFire();
+            return;
+        }
+
         if (gameOver || gameWon) {
             if (Gdx.input.isKeyJustPressed(Keys.R)) {
                 pendingEnemyReinforcements.clear();
                 defeatedThisLevel.clear();
                 reinforcementsInCurrentLevel = 0;
                 playerHp = 100f;
+                playerMp = playerMaxMp;
+                fireCooldown = 0f;
+                fireballs.clear();
                 gameWon = false;
                 gameOver = false;
                 beginLevel(0);
@@ -498,10 +560,15 @@ public class GameScreen implements Screen {
 
         float dx = (right ? 1f : 0f) - (left ? 1f : 0f);
         float dy = (down ? 1f : 0f) - (up ? 1f : 0f);
+        Vector2 stick = joystick.update(hudViewport);
+        dx += stick.x;
+        dy -= stick.y; // the joystick's y points up, the dungeon's y points down
         float len = (float) Math.hypot(dx, dy);
         if (len > 0f) {
             dx /= len;
             dy /= len;
+            aimX = dx; // fireballs fly where the player last walked
+            aimY = dy;
             if (Math.abs(dx) > Math.abs(dy)) {
                 facing = dx < 0f ? 2 : 3;
             } else {
@@ -524,23 +591,28 @@ public class GameScreen implements Screen {
             if (playerHp <= 0f) gameOver = true;
         }
 
-        if (Gdx.input.isKeyPressed(Keys.SPACE) && attackCooldown <= 0f) {
+        boolean swordPressed = Gdx.input.isKeyPressed(Keys.SPACE) | buttons.pollSword();
+        boolean firePressed = Gdx.input.isKeyJustPressed(Keys.F) | buttons.pollFire();
+
+        if (swordPressed && attackCooldown <= 0f) {
             attackCooldown = 28f / 60f;
             playerAttackTime = 0.42f;
             for (Enemy e : enemies) {
                 if (!e.dead && !e.dying && Math.hypot(e.x - px, e.y - py) < 57.0) {
-                    e.hp -= 42f;
-                    e.hitFlash = 7f / 60f;
-                    if (e.hp <= 0f) {
-                        e.dying = true;
-                        e.deathTime = 0f;
-                        e.action = "die";
-                        defeatedThisLevel.add(e.type);
-                        WikiProgress.unlock(e.type);
-                    }
+                    damageEnemy(e, 42f);
                 }
             }
         }
+
+        // fireball: costs MP, then has a short cooldown
+        if (fireCooldown > 0f) fireCooldown = Math.max(0f, fireCooldown - dt);
+        playerMp = Math.min(playerMaxMp, playerMp + MP_REGEN * dt);
+        if (firePressed && fireCooldown <= 0f && playerMp >= FIRE_MP_COST) {
+            playerMp -= FIRE_MP_COST;
+            fireCooldown = FIRE_COOLDOWN;
+            fireballs.shoot(px, py, aimX, aimY);
+        }
+        fireballs.update(dt, fireWorld);
 
         if (Gdx.input.isKeyJustPressed(Keys.E)) {
             Door nearest = null;
@@ -628,13 +700,29 @@ public class GameScreen implements Screen {
         updateCamera(false);
     }
 
+    /** Hurts an enemy (sword or fireball). When its HP is gone it starts dying. */
+    private void damageEnemy(Enemy e, float damage) {
+        e.hp -= damage;
+        e.hitFlash = 7f / 60f;
+        if (e.hp <= 0f && !e.dying) {
+            e.dying = true;
+            e.deathTime = 0f;
+            e.action = "die";
+            defeatedThisLevel.add(e.type);
+            WikiProgress.unlock(e.type);
+        }
+    }
+
     private void openPauseMenu() {
         if (game instanceof DungeonBound) {
             DungeonBound db = (DungeonBound) game;
             db.setScreen(PauseMenuScreen.create(
                 db,
                 () -> db.setScreen(this, false),
-                () -> db.setScreen(this, false),
+                () -> { // "Items": back to the game with the inventory open
+                    inventory.openPanel();
+                    db.setScreen(this, false);
+                },
                 () -> db.setScreen(this, false),
                 () -> {
                     dispose();
@@ -674,13 +762,16 @@ public class GameScreen implements Screen {
 
     @Override
     public void show() {
-        Gdx.input.setInputProcessor(new InputAdapter() {
+        InputMultiplexer input = new InputMultiplexer();
+        input.addProcessor(buttons); // sword / fireball buttons
+        input.addProcessor(new InputAdapter() {
             @Override
             public boolean scrolled(float amountX, float amountY) {
                 setZoom(zoom * (amountY < 0f ? 1.12f : 1f / 1.12f));
                 return true;
             }
         });
+        Gdx.input.setInputProcessor(input);
     }
 
     @Override
@@ -768,43 +859,67 @@ public class GameScreen implements Screen {
             batch.setColor(Color.WHITE);
         }
 
+        fireballs.render(batch, worldHeight);
+
         batch.end();
 
         // ---- HUD pass
         hudViewport.apply();
         batch.setProjectionMatrix(hudCam.combined);
+        shape.setProjectionMatrix(hudCam.combined);
+        float hw = hudViewport.getWorldWidth();
+        float hh = hudViewport.getWorldHeight();
+
         batch.begin();
-        drawHud();
+        drawInfoPanel();   // level / enemies / controls: bottom, next to the joystick
+        batch.end();
+
+        joystick.render(shape);                                              // bottom left
+        buttons.render(shape, batch, attackCooldown > 0f, fireCooldown / FIRE_COOLDOWN); // bottom right
+        playerHud.render(shape, batch, portrait, Math.round(playerHp), 100,
+            Math.round(playerMp), Math.round(playerMaxMp), pesos);           // upper left
+        inventory.render(shape, batch, hw, hh);                              // bag icon below the profile
+
+        batch.begin();
+        drawOverlays();    // level banner, game over / win screen
         batch.end();
     }
 
-    private void drawHud() {
+    /** The text that used to fill the upper-left corner. Now it sits at the bottom, level with the joystick. */
+    private void drawInfoPanel() {
+        float jr = joystick.getRadius();
+        float panelW = 340f;
+        float panelH = 108f;
+        float panelX = joystick.getCenterX() + jr + 18f;      // right of the joystick
+        float panelY = joystick.getCenterY() - panelH / 2f;   // same height as the joystick
+        float top = panelY + panelH;
+
+        drawRect(panelX, panelY, panelW, panelH, new Color(12f / 255f, 10f / 255f, 12f / 255f, 200f / 255f));
+
+        hudFont.setColor(new Color(1f, 225f / 255f, 180f / 255f, 1f));
+        hudFont.draw(batch, "MGA NILALANG  •  LEVEL " + (level + 1) + " / 5  •  " + TYPES[level], panelX + 12f, top - 10f);
+
+        hudFont.setColor(Color.WHITE);
+        hudFont.draw(batch, "Enemies: " + enemies.size(), panelX + 12f, top - 32f);
+
+        hudFont.setColor(new Color(230f / 255f, 205f / 255f, 150f / 255f, 1f));
+        hudFont.draw(batch, "Returning hostile reinforcements: " + reinforcementsInCurrentLevel, panelX + 12f, top - 54f);
+
+        smallFont.setColor(new Color(245f / 255f, 235f / 255f, 215f / 255f, 1f));
+        smallFont.draw(batch, "WASD / Joystick: Move   SPACE: Attack   F: Fireball   E: Door", panelX + 12f, top - 78f);
+        smallFont.draw(batch, "I: Items   Wheel / +/-: Zoom   ESC: Pause", panelX + 12f, top - 94f);
+    }
+
+    private void drawOverlays() {
         float hh = hudViewport.getWorldHeight();
         float hw = hudViewport.getWorldWidth();
 
-        drawRect(12f, hh - 102f, 470f, 92f, new Color(12f / 255f, 10f / 255f, 12f / 255f, 220f / 255f));
-        hudFont.setColor(new Color(1f, 225f / 255f, 180f / 255f, 1f));
-        hudFont.draw(batch, "MGA NILALANG  •  LEVEL " + (level + 1) + " / 5  •  " + TYPES[level], 24f, hh - 22f);
-
-        drawRect(24f, hh - 56f, 180f, 12f, new Color(65f / 255f, 35f / 255f, 35f / 255f, 1f));
-        drawRect(24f, hh - 56f, 180f * Math.max(0f, playerHp / 100f), 12f,
-            new Color(190f / 255f, 52f / 255f, 48f / 255f, 1f));
-
-        hudFont.setColor(Color.WHITE);
-        hudFont.draw(batch, "HP " + (int) playerHp + "%     Enemies: " + enemies.size(), 216f, hh - 44f);
-
-        hudFont.setColor(new Color(230f / 255f, 205f / 255f, 150f / 255f, 1f));
-        hudFont.draw(batch, "Returning hostile reinforcements: " + reinforcementsInCurrentLevel, 24f, hh - 72f);
-
-        smallFont.setColor(new Color(245f / 255f, 235f / 255f, 215f / 255f, 1f));
-        smallFont.draw(batch, "WASD: Move   SPACE: Attack   E: Door   Wheel / +/-: Zoom   ESC: Pause", 495f, hh - 20f);
-
         if (stageBanner > 0f) {
-            drawRect(hw / 2f - 170f, hh - 152f, 340f, 62f, new Color(0f, 0f, 0f, 175f / 255f));
+            drawRect(hw / 2f - 170f, hh - 110f, 340f, 62f, new Color(0f, 0f, 0f, 175f / 255f));
             String bMsg = "LEVEL " + (level + 1) + " — " + TYPES[level].toUpperCase(Locale.ROOT);
             bannerFont.setColor(new Color(1f, 222f / 255f, 160f / 255f, 1f));
             layout.setText(bannerFont, bMsg);
-            bannerFont.draw(batch, bMsg, (hw - layout.width) / 2f, hh - 112f);
+            bannerFont.draw(batch, bMsg, (hw - layout.width) / 2f, hh - 70f);
         }
 
         if (gameOver || gameWon) {
@@ -827,6 +942,12 @@ public class GameScreen implements Screen {
     public void resize(int w, int h) {
         worldViewport.update(w, h, false);
         hudViewport.update(w, h, true);
+        float hw = hudViewport.getWorldWidth();
+        float hh = hudViewport.getWorldHeight();
+        joystick.layout(hh);                                        // bottom left
+        buttons.layout(hw, hh);                                     // bottom right
+        playerHud.layout(hw, hh);                                   // upper left
+        inventory.layout(hw, hh, playerHud.getProfileRect());       // icon right below the profile
         updateCamera(true);
     }
 
@@ -843,6 +964,11 @@ public class GameScreen implements Screen {
         if (disposed) return;
         disposed = true;
         batch.dispose();
+        shape.dispose();
+        inventory.dispose();
+        buttons.dispose();
+        fireballs.dispose();
+        uiFont.dispose();
         pixelTex.dispose();
         hudFont.dispose();
         smallFont.dispose();

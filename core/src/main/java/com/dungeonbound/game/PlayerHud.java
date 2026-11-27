@@ -5,6 +5,7 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Rectangle;
 
@@ -50,28 +51,35 @@ public class PlayerHud {
     }
 
     public void render(ShapeRenderer shape, SpriteBatch batch, Player player) {
+        render(shape, batch, player.getPortrait(), player.getHp(), player.getMaxHp(),
+            player.getMp(), player.getMaxMp(), player.getPesos());
+    }
+
+    /** Draws the profile picture, the HP / MP bars and the money. */
+    public void render(ShapeRenderer shape, SpriteBatch batch, TextureRegion portrait,
+                       int hp, int maxHp, int mp, int maxMp, int pesos) {
         Gdx.gl.glEnable(GL20.GL_BLEND);
         shape.begin(ShapeRenderer.ShapeType.Filled);
         HudStyle.box(shape, profileRect.x, profileRect.y, profileRect.width, profileRect.height,
             3f * s, HudStyle.WOOD_LIGHT, HudStyle.PANEL_DARK);
-        drawBar(shape, hpRect, player.getHp() / (float) player.getMaxHp(), HudStyle.HP);
-        drawBar(shape, mpRect, player.getMp() / (float) player.getMaxMp(), HudStyle.MP);
+        drawBar(shape, hpRect, hp / (float) maxHp, HudStyle.HP);
+        drawBar(shape, mpRect, mp / (float) maxMp, HudStyle.MP);
         shape.end();
         Gdx.gl.glDisable(GL20.GL_BLEND);
 
         batch.begin();
         float pad = 5f * s;
-        batch.draw(player.getPortrait(), profileRect.x + pad, profileRect.y + pad,
+        batch.draw(portrait, profileRect.x + pad, profileRect.y + pad,
             profileRect.width - 2f * pad, profileRect.height - 2f * pad);
 
         HudStyle.setPx(font, 11f * s);
-        HudStyle.drawCenteredShadow(batch, font, "HP " + player.getHp() + "/" + player.getMaxHp(),
+        HudStyle.drawCenteredShadow(batch, font, "HP " + hp + "/" + maxHp,
             hpRect.x + hpRect.width / 2f, hpRect.y + hpRect.height / 2f, Math.max(1f, s));
-        HudStyle.drawCenteredShadow(batch, font, "MP " + player.getMp() + "/" + player.getMaxMp(),
+        HudStyle.drawCenteredShadow(batch, font, "MP " + mp + "/" + maxMp,
             mpRect.x + mpRect.width / 2f, mpRect.y + mpRect.height / 2f, Math.max(1f, s));
 
         HudStyle.setPx(font, 16f * s);
-        HudStyle.drawLeft(batch, font, "\u20B1 " + player.getPesos(),
+        HudStyle.drawLeft(batch, font, "\u20B1 " + pesos,
             moneyRect.x + 2f * s, moneyRect.y + moneyRect.height / 2f, HudStyle.GOLD);
         batch.end();
     }
