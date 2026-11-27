@@ -54,10 +54,10 @@ public class GameScreen implements Screen {
         {34, 19, 35, 12},  // east middle chamber
         {20, 30, 49, 16}   // large lower chamber
     };
-    private static final int[][] SPAWNS = {{15, 15}, {33, 15}, {28, 25}, {50, 24}, {34, 38}};
+    private static final int[][] SPAWNS = {{15, 15}, {39, 10}, {28, 25}, {50, 24}, {34, 38}};
     private static final int[][][] ENEMY_SPAWNS = {
         {{12, 11}, {17, 12}, {17, 18}},
-        {{27, 9}, {35, 15}, {40, 10}, {48, 12}},
+        {{27, 9}, {35, 12}, {40, 10}, {48, 12}},
         {{24, 24}, {28, 23}, {30, 24}},
         {{39, 24}, {45, 22}, {48, 25}, {64, 23}},
         {{25, 36}, {34, 40}, {39, 35}, {54, 40}, {63, 36}}
@@ -157,6 +157,11 @@ public class GameScreen implements Screen {
     private boolean gameWon = false;
     private boolean gameOver = false;
     private boolean disposed = false;
+    // ---- Audio state ----
+    private float footstepTimer = 0f;
+    private static final float FOOTSTEP_INTERVAL = 0.3f;
+    private boolean gameOverSoundPlayed = false;
+    private boolean victorySoundPlayed = false;
 
     // ---- touch controls, profile HUD, inventory, fireballs ----
     private static final float FIRE_COOLDOWN = 0.7f;  // seconds between fireballs
@@ -313,6 +318,19 @@ public class GameScreen implements Screen {
         // JSON layers are stored front-to-back; reverse order paints the floor first and walls/props above.
         for (int li = parsedLayers.size() - 1; li >= 0; li--) {
             drawTiles.addAll(parsedLayers.get(li));
+        }
+
+        // ---- Level 3 bridge runtime collision patch ----
+        // Tiles x=29..34, y=17..20 are the bridge leading to the Manananggal chamber.
+        // The map.json marks them as void; we patch them to walkable at runtime so the
+        // player can cross into the east chamber without touching map.json.
+        for (int bx = 29; bx <= 34; bx++) {
+            for (int by = 17; by <= 20; by++) {
+                if (bx >= 0 && by >= 0 && bx < mapWidth && by < mapHeight) {
+                    floor[bx][by] = true;
+                    wall[bx][by] = false;
+                }
+            }
         }
 
         // Clear static wall collision on door cells; the Door objects handle blocking until opened.
@@ -542,6 +560,8 @@ public class GameScreen implements Screen {
                 fireballs.clear();
                 gameWon = false;
                 gameOver = false;
+                gameOverSoundPlayed = false;
+                victorySoundPlayed = false;
                 beginLevel(0);
             }
             return;
@@ -575,6 +595,14 @@ public class GameScreen implements Screen {
                 facing = dy < 0f ? 0 : 1;
             }
             playerAnimTime += dt;
+            // Footstep SFX every FOOTSTEP_INTERVAL seconds while moving
+            footstepTimer -= dt;
+            if (footstepTimer <= 0f) {
+                AudioManager.getInstance().playFootstep();
+                footstepTimer = FOOTSTEP_INTERVAL;
+            }
+        } else {
+            footstepTimer = 0f; // reset so next step fires immediately
         }
 
         float speed = 2.35f * 60f * dt;
@@ -588,7 +616,14 @@ public class GameScreen implements Screen {
             playerHp = Math.max(0f, playerHp - 8f);
             trapDamageCooldown = 48f / 60f;
             playerHurtTime = 12f / 60f;
-            if (playerHp <= 0f) gameOver = true;
+            AudioManager.getInstance().playPlayerHurt();
+            if (playerHp <= 0f) {
+                gameOver = true;
+                if (!gameOverSoundPlayed) {
+                    AudioManager.getInstance().playGameOver();
+                    gameOverSoundPlayed = true;
+                }
+            }
         }
 
         boolean swordPressed = Gdx.input.isKeyPressed(Keys.SPACE) | buttons.pollSword();
@@ -597,6 +632,7 @@ public class GameScreen implements Screen {
         if (swordPressed && attackCooldown <= 0f) {
             attackCooldown = 28f / 60f;
             playerAttackTime = 0.42f;
+            AudioManager.getInstance().playSwordSwing();
             for (Enemy e : enemies) {
                 if (!e.dead && !e.dying && Math.hypot(e.x - px, e.y - py) < 57.0) {
                     damageEnemy(e, 42f);
@@ -624,7 +660,10 @@ public class GameScreen implements Screen {
                     nearest = d;
                 }
             }
-            if (nearest != null) nearest.opening = true;
+            if (nearest != null) {
+                nearest.opening = true;
+                AudioManager.getInstance().playDoorOpen();
+            }
         }
 
         for (Door d : doors) {
@@ -653,6 +692,7 @@ public class GameScreen implements Screen {
             if (!e.alerted && dist < 190.0) {
                 e.alerted = true;
                 e.alertTime = 2.0f;
+                AudioManager.getInstance().playEnemyAlert();
             }
             if (e.alerted && e.alertTime > 0f) {
                 e.alertTime = Math.max(0f, e.alertTime - dt);
@@ -660,7 +700,8 @@ public class GameScreen implements Screen {
                 e.facingLeft = px < e.x;
             } else if (e.alerted && dist < 230.0) {
                 e.facingLeft = px < e.x;
-                if (dist > 34.0) {
+                double attackRange = e.type.equals("tiyanak") ? 22.0 : 34.0;
+                if (dist > attackRange) {
                     e.action = "walk";
                     float vx = (px - e.x) / (float) dist;
                     float vy = (py - e.y) / (float) dist;
@@ -676,9 +717,14 @@ public class GameScreen implements Screen {
                         playerHp -= e.type.equals("kapre") ? 13f : 9f;
                         e.attackCooldown = 58f / 60f;
                         playerHurtTime = 12f / 60f;
+                        AudioManager.getInstance().playPlayerHurt();
                         if (playerHp <= 0f) {
                             playerHp = 0f;
                             gameOver = true;
+                            if (!gameOverSoundPlayed) {
+                                AudioManager.getInstance().playGameOver();
+                                gameOverSoundPlayed = true;
+                            }
                         }
                     }
                 }
@@ -691,9 +737,14 @@ public class GameScreen implements Screen {
         if (enemies.isEmpty()) {
             if (level < TYPES.length - 1) {
                 pendingEnemyReinforcements.addAll(defeatedThisLevel);
+                AudioManager.getInstance().playLevelUp();
                 beginLevel(level + 1);
             } else {
                 gameWon = true;
+                if (!victorySoundPlayed) {
+                    AudioManager.getInstance().playVictory();
+                    victorySoundPlayed = true;
+                }
             }
         }
 
@@ -710,6 +761,9 @@ public class GameScreen implements Screen {
             e.action = "die";
             defeatedThisLevel.add(e.type);
             WikiProgress.unlock(e.type);
+            AudioManager.getInstance().playEnemyDie();
+        } else {
+            AudioManager.getInstance().playEnemyHit();
         }
     }
 
@@ -772,11 +826,15 @@ public class GameScreen implements Screen {
             }
         });
         Gdx.input.setInputProcessor(input);
+        // Start BGM + ambience when entering GameScreen
+        AudioManager.getInstance().playMusic("audio/bgm_title.mp3", true, 0.7f);
+        AudioManager.getInstance().playAmbience("audio/amb_crickets.wav", true, 0.4f);
     }
 
     @Override
     public void render(float delta) {
         float dt = Math.min(delta, 1f / 30f);
+        AudioManager.getInstance().update(dt);
         updateGame(dt);
 
         Gdx.gl.glClearColor(0f, 0f, 0f, 1f);
@@ -812,7 +870,7 @@ public class GameScreen implements Screen {
             else anim = flip ? e.walkL : e.walkR;
 
             TextureRegion im = getAnimFrame(anim, e.dying ? e.deathTime : e.animTime, e.dying ? 13f : 11f);
-            float size = e.type.equals("kapre") ? 58f : 48f;
+            float size = e.type.equals("kapre") ? 58f : (e.type.equals("tiyanak") ? 26f : 48f);
             float drawW = size;
             float drawH = size;
             if (im != null) {
@@ -822,10 +880,10 @@ public class GameScreen implements Screen {
             if (e.hitFlash > 0f && !e.dying) {
                 batch.setColor(1f, 0.7f, 0.7f, 1f);
             }
+            float dy = toWorldY(e.y - drawH + 7f, drawH);
             if (im != null) {
                 boolean mirror = flip && (anim == e.walkR || anim == e.attackR);
                 float dx = e.x - drawW / 2f;
-                float dy = toWorldY(e.y - drawH + 7f, drawH);
                 if (mirror) {
                     batch.draw(im, dx + drawW, dy, -drawW, drawH);
                 } else {
@@ -835,14 +893,15 @@ public class GameScreen implements Screen {
             batch.setColor(Color.WHITE);
 
             if (!e.dying) {
-                float barX = e.x - 19f;
-                float barY = toWorldY(e.y - size / 2f - 8f, 5f);
-                drawRect(barX, barY, 38f, 5f, new Color(25f / 255f, 15f / 255f, 15f / 255f, 1f));
-                drawRect(barX, barY, 38f * Math.max(0f, e.hp / e.maxHp), 5f,
+                float barW = e.type.equals("tiyanak") ? 22f : 38f;
+                float barX = e.x - barW / 2f;
+                float barY = dy + drawH + 2f;
+                drawRect(barX, barY, barW, 5f, new Color(25f / 255f, 15f / 255f, 15f / 255f, 1f));
+                drawRect(barX, barY, barW * Math.max(0f, e.hp / e.maxHp), 5f,
                     new Color(190f / 255f, 45f / 255f, 38f / 255f, 1f));
                 if (e.alerted && e.alertTime > 0f) {
                     smallFont.setColor(new Color(1f, 220f / 255f, 90f / 255f, 1f));
-                    smallFont.draw(batch, "!", e.x - 2f, toWorldY(e.y - size / 2f - 24f, 0f));
+                    smallFont.draw(batch, "!", e.x - 2f, dy + drawH + 17f);
                 }
             }
         }
