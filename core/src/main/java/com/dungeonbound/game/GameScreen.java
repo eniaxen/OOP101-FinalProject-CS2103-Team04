@@ -57,9 +57,9 @@ public class GameScreen implements Screen {
     private static final int[][] SPAWNS = {{15, 15}, {39, 10}, {28, 25}, {50, 24}, {34, 38}};
     private static final int[][][] ENEMY_SPAWNS = {
         {{12, 11}, {17, 12}, {17, 18}},
-        {{27, 9}, {35, 12}, {40, 10}, {48, 12}},
+        {{27, 9}, {38, 8},  {40, 10}, {48, 12}},   // (35,12) was in wall → moved to (38,8)
         {{24, 24}, {28, 23}, {30, 24}},
-        {{39, 24}, {45, 22}, {48, 25}, {64, 23}},
+        {{39, 24}, {45, 22}, {48, 25}, {42, 26}},   // (64,23) was in void → moved to (42,26)
         {{25, 36}, {34, 40}, {39, 35}, {54, 40}, {63, 36}}
     };
 
@@ -321,10 +321,10 @@ public class GameScreen implements Screen {
         }
 
         // ---- Level 3 bridge runtime collision patch ----
-        // Tiles x=29..34, y=17..20 are the bridge leading to the Manananggal chamber.
-        // The map.json marks them as void; we patch them to walkable at runtime so the
-        // player can cross into the east chamber without touching map.json.
-        for (int bx = 29; bx <= 34; bx++) {
+        // The corridor x=29..39, y=17..20 is void in map.json but visually connects the
+        // west middle chamber to the Manananggal doors at x=40..41 and x=44..45.
+        // Extending to x=29..41 ensures no gap between the patched area and the door cells.
+        for (int bx = 29; bx <= 41; bx++) {
             for (int by = 17; by <= 20; by++) {
                 if (bx >= 0 && by >= 0 && bx < mapWidth && by < mapHeight) {
                     floor[bx][by] = true;
@@ -708,8 +708,21 @@ public class GameScreen implements Screen {
                     float nx = e.x + vx * enemySpeed;
                     float ny = e.y + vy * enemySpeed;
                     if (canStand(nx, ny)) {
+                        // Full diagonal move is clear
                         e.x = nx;
                         e.y = ny;
+                    } else if (canStand(nx, e.y)) {
+                        // Wall-slide: horizontal only
+                        e.x = nx;
+                    } else if (canStand(e.x, ny)) {
+                        // Wall-slide: vertical only
+                        e.y = ny;
+                    }
+                    // Safety: if enemy somehow drifted into a non-walkable tile, nudge back
+                    if (!canStand(e.x, e.y)) {
+                        int[] safe = nearestWalkable((int)(e.x / TILE), (int)(e.y / TILE));
+                        e.x = safe[0] * TILE + 8f;
+                        e.y = safe[1] * TILE + 8f;
                     }
                 } else {
                     e.action = "attack";
