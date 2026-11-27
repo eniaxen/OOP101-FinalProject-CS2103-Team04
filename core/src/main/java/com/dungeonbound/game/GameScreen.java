@@ -2,192 +2,862 @@ package com.dungeonbound.game;
 
 import com.badlogic.gdx.Game;
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.Input;
+import com.badlogic.gdx.Input.Keys;
+import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.assets.AssetManager;
+import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
+import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
+import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
-import com.badlogic.gdx.math.MathUtils;
-import com.badlogic.gdx.math.Vector2;
-import com.badlogic.gdx.utils.ScreenUtils;
+import com.badlogic.gdx.graphics.g2d.TextureAtlas;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGenerator;
+import com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGenerator.FreeTypeFontParameter;
+import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.utils.JsonReader;
+import com.badlogic.gdx.utils.JsonValue;
 import com.badlogic.gdx.utils.viewport.ExtendViewport;
-import com.badlogic.gdx.utils.viewport.ScreenViewport;
-import com.badlogic.gdx.utils.viewport.Viewport;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
 
 /**
- * The dungeon itself: map, player, joystick, attack buttons, fireballs and inventory.
- * StartMenu -> LoadingScreen -> GameScreen.  ESC opens the pause menu (PauseMenuScreen).
+ * Mga Nilalang — five-stage Filipino folklore dungeon gameplay screen.
+ * Ported to libGDX using map.json, tile atlas, player strips, and enemy PNG atlases.
  */
 public class GameScreen implements Screen {
-    private static final float VIEW_W = 400f; // how much of the dungeon is visible (world pixels)
-    private static final float VIEW_H = 300f;
-    private static final float FIRE_COOLDOWN = 0.7f;
 
-    private final DungeonBound game;
-    private final AssetManager assets; // from LoadingScreen (may be null); this screen disposes it
+    private static final int TILE = 16;
+    private static final float VIEW_W = 960f;
+    private static final float VIEW_H = 640f;
 
+    private static final String[] TYPES = {"Tiyanak", "Aswang", "Tikbalang", "Manananggal", "Kapre"};
+    private static final String[] KEYS = {"tiyanak", "aswang", "tikbalang", "manananggal", "kapre"};
+    private static final int[][] AREAS = {
+        {10, 7, 20, 15},   // smallest starting chamber
+        {25, 4, 27, 17},   // upper hall
+        {21, 19, 22, 15},  // west middle chamber
+        {34, 19, 35, 12},  // east middle chamber
+        {20, 30, 49, 16}   // large lower chamber
+    };
+    private static final int[][] SPAWNS = {{15, 15}, {33, 15}, {28, 25}, {50, 24}, {34, 38}};
+    private static final int[][][] ENEMY_SPAWNS = {
+        {{12, 11}, {17, 12}, {17, 18}},
+        {{27, 9}, {35, 15}, {40, 10}, {48, 12}},
+        {{24, 24}, {28, 23}, {30, 24}},
+        {{39, 24}, {45, 22}, {48, 25}, {64, 23}},
+        {{25, 36}, {34, 40}, {39, 35}, {54, 40}, {63, 36}}
+    };
+
+    private static class Tile {
+        final int id, x, y;
+        Tile(int id, int x, int y) {
+            this.id = id;
+            this.x = x;
+            this.y = y;
+        }
+    }
+
+    private static class Door {
+        final float x, y, w, h;
+        float open = 0f;
+        boolean opening = false;
+
+        Door(float x, float y, float w, float h) {
+            this.x = x;
+            this.y = y;
+            this.w = w;
+            this.h = h;
+        }
+    }
+
+    private static class Enemy {
+        final String type;
+        float x, y, hp, maxHp;
+        float animTime = 0f;
+        float attackCooldown = 0f;
+        float hitFlash = 0f;
+        boolean dying = false;
+        boolean dead = false;
+        float deathTime = 0f;
+        boolean facingLeft = true;
+        TextureRegion[] walkR, walkL, attackR, attackL, die;
+        String action = "walk";
+        boolean alerted = false;
+        float alertTime = 0f;
+
+        Enemy(String type, float x, float y) {
+            this.type = type;
+            this.x = x;
+            this.y = y;
+            this.maxHp = this.hp = type.equals("kapre") ? 145f : 85f;
+        }
+    }
+
+    private final Game game;
+    private final AssetManager assets;
+    private final List<Texture> ownedTextures = new ArrayList<>();
     private final SpriteBatch batch = new SpriteBatch();
-    private final ShapeRenderer shape = new ShapeRenderer();
-    private final GameMap map;
-    private final Player player;
-    private final Joystick joystick = new Joystick();
-    private final BitmapFont hudFont;   // one font shared by the profile HUD and the inventory
-    private final PlayerHud playerHud;
-    private final Inventory inventory;
-    private final ActionButtons buttons;
-    private final Fireballs fireballs;
+    private final OrthographicCamera worldCam = new OrthographicCamera();
+    private final ExtendViewport worldViewport = new ExtendViewport(VIEW_W, VIEW_H, worldCam);
+    private final OrthographicCamera hudCam = new OrthographicCamera();
+    private final ExtendViewport hudViewport = new ExtendViewport(VIEW_W, VIEW_H, hudCam);
 
-    private final OrthographicCamera camera = new OrthographicCamera();
-    private final Viewport viewport = new ExtendViewport(VIEW_W, VIEW_H, camera);
-    private final OrthographicCamera hudCamera = new OrthographicCamera();
-    private final Viewport hudViewport = new ScreenViewport(hudCamera);
+    private Texture pixelTex;
+    private BitmapFont hudFont;
+    private BitmapFont smallFont;
+    private BitmapFont bannerFont;
+    private BitmapFont titleFont;
+    private final GlyphLayout layout = new GlyphLayout();
 
-    private float fireCooldown;
-    private boolean disposed;
+    private Texture tileAtlas;
+    private TextureAtlas enemyAtlas;
+    private TextureAtlas ownedEnemyAtlas;
+    private final Map<Integer, TextureRegion> tileRegions = new HashMap<>();
+    private int mapWidth, mapHeight;
+    private float worldHeight;
+    private final List<Tile> drawTiles = new ArrayList<>();
+    private boolean[][] wall;
+    private boolean[][] floor;
+    private final Set<Long> trapTiles = new HashSet<>();
+    private float trapDamageCooldown = 0f;
+
+    private TextureRegion[] doorFrames;
+    private final List<Door> doors = new ArrayList<>();
+    private final List<Enemy> enemies = new ArrayList<>();
+    private final List<String> pendingEnemyReinforcements = new ArrayList<>();
+    private final List<String> defeatedThisLevel = new ArrayList<>();
+    private final Map<String, TextureRegion[]> playerFrames = new HashMap<>();
+    private final Map<String, TextureRegion[]> enemyAnimCache = new HashMap<>();
+    private final Random random = new Random(412);
+
+    private float px, py, playerAnimTime, playerAttackTime;
+    private int facing = 3; // 0 up, 1 down, 2 left, 3 right
+    private float playerHp = 100f;
+    private int level = 0;
+    private int reinforcementsInCurrentLevel = 0;
+    private float cameraX, cameraY, zoom = 1.0f;
+    private float playerHurtTime = 0f;
+    private float attackCooldown = 0f;
+    private float stageBanner = 2.0f;
+    private boolean gameWon = false;
+    private boolean gameOver = false;
+    private boolean disposed = false;
 
     public GameScreen(Game game, AssetManager assets) {
-        this.game = (DungeonBound) game;
+        this.game = game;
         this.assets = assets;
-        map = new GameMap();
-        // Start in the big middle room (world y is flipped compared to the picture).
-        player = new Player(640f, map.height - 330f);
-        hudFont = HudStyle.createFont();
-        playerHud = new PlayerHud(hudFont);
-        inventory = new Inventory(hudFont);
-        buttons = new ActionButtons(hudViewport);
-        fireballs = new Fireballs();
+        init();
     }
 
     public GameScreen(Game game) {
         this(game, null);
     }
 
+    private void init() {
+        Pixmap pm = new Pixmap(1, 1, Pixmap.Format.RGBA8888);
+        pm.setColor(Color.WHITE);
+        pm.fill();
+        pixelTex = new Texture(pm);
+        pm.dispose();
+
+        hudFont = createFont(15);
+        smallFont = createFont(12);
+        bannerFont = createFont(28);
+        titleFont = createFont(40);
+
+        tileAtlas = getTex("map/tiles.png");
+        doorFrames = splitStrip(getTex("map/DoorAnimation.png"), 9);
+        if (assets != null && assets.isLoaded("enemies/enemies.atlas", TextureAtlas.class)) {
+            enemyAtlas = assets.get("enemies/enemies.atlas", TextureAtlas.class);
+        } else {
+            ownedEnemyAtlas = new TextureAtlas(Gdx.files.internal("enemies/enemies.atlas"));
+            enemyAtlas = ownedEnemyAtlas;
+        }
+
+        loadMap();
+        loadPlayer();
+        beginLevel(0);
+    }
+
+    private BitmapFont createFont(int size) {
+        FreeTypeFontGenerator gen = new FreeTypeFontGenerator(Gdx.files.internal("fonts/font_body.ttf"));
+        FreeTypeFontParameter p = new FreeTypeFontParameter();
+        p.size = size;
+        p.minFilter = Texture.TextureFilter.Linear;
+        p.magFilter = Texture.TextureFilter.Linear;
+        p.characters = FreeTypeFontGenerator.DEFAULT_CHARS;
+        BitmapFont f = gen.generateFont(p);
+        gen.dispose();
+        return f;
+    }
+
+    private Texture getTex(String path) {
+        if (assets != null && assets.isLoaded(path, Texture.class)) {
+            return assets.get(path, Texture.class);
+        }
+        Texture t = new Texture(Gdx.files.internal(path));
+        t.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        ownedTextures.add(t);
+        return t;
+    }
+
+    private TextureRegion[] splitStrip(Texture tex, int frames) {
+        int cw = tex.getWidth() / frames;
+        int ch = tex.getHeight();
+        TextureRegion[] out = new TextureRegion[frames];
+        for (int i = 0; i < frames; i++) {
+            out[i] = new TextureRegion(tex, i * cw, 0, cw, ch);
+        }
+        return out;
+    }
+
+    private void loadMap() {
+        JsonValue root = new JsonReader().parse(Gdx.files.internal("map/map.json"));
+        mapWidth = root.getInt("mapWidth");
+        mapHeight = root.getInt("mapHeight");
+        worldHeight = mapHeight * TILE;
+        wall = new boolean[mapWidth][mapHeight];
+        floor = new boolean[mapWidth][mapHeight];
+
+        List<List<Tile>> parsedLayers = new ArrayList<>();
+        JsonValue layers = root.get("layers");
+        for (JsonValue layer = layers.child; layer != null; layer = layer.next) {
+            String name = layer.getString("name");
+            List<Tile> layerTiles = new ArrayList<>();
+            boolean solid = isSolidLayer(name);
+            boolean isTraps = name.trim().equalsIgnoreCase("traps");
+            boolean isBaseFloor = name.equalsIgnoreCase("New layer");
+            boolean isDoorLayer = name.equalsIgnoreCase("door wall open");
+
+            JsonValue tiles = layer.get("tiles");
+            for (JsonValue tile = tiles.child; tile != null; tile = tile.next) {
+                int id = tile.getInt("id");
+                int x = tile.getInt("x");
+                int y = tile.getInt("y");
+                layerTiles.add(new Tile(id, x, y));
+
+                if (x >= 0 && y >= 0 && x < mapWidth && y < mapHeight) {
+                    if (solid) wall[x][y] = true;
+                    if (isTraps) trapTiles.add((((long) y) << 32) | (x & 0xffffffffL));
+                    if (isBaseFloor && (id == 0 || id == 1)) floor[x][y] = true;
+                    if (isDoorLayer && id == 78) {
+                        doors.add(new Door(x * TILE, y * TILE, 2 * TILE, 2 * TILE));
+                    }
+                }
+            }
+            parsedLayers.add(layerTiles);
+        }
+
+        // JSON layers are stored front-to-back; reverse order paints the floor first and walls/props above.
+        for (int li = parsedLayers.size() - 1; li >= 0; li--) {
+            drawTiles.addAll(parsedLayers.get(li));
+        }
+
+        // Clear static wall collision on door cells; the Door objects handle blocking until opened.
+        for (Door d : doors) {
+            int x0 = (int) (d.x / TILE);
+            int y0 = (int) (d.y / TILE);
+            int doorHeightTiles = (int) Math.ceil(d.h / TILE);
+            for (int x = x0; x < x0 + 2; x++) {
+                for (int y = y0; y < y0 + doorHeightTiles; y++) {
+                    if (x >= 0 && y >= 0 && x < mapWidth && y < mapHeight) {
+                        wall[x][y] = false;
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean isSolidLayer(String n) {
+        String s = n.toLowerCase(Locale.ROOT);
+        return s.equals("wall vertical")
+            || s.equals("wall horizontal")
+            || s.trim().equals("walls details")
+            || s.trim().equals("details wall/ doors");
+    }
+
+    private void loadPlayer() {
+        playerFrames.put("down", splitStrip(getTex("player/walk_down.png"), 8));
+        playerFrames.put("up", splitStrip(getTex("player/walk_up.png"), 7));
+        playerFrames.put("left", splitStrip(getTex("player/walk_left.png"), 8));
+        playerFrames.put("right", splitStrip(getTex("player/walk_right.png"), 9));
+        playerFrames.put("swordLeft", splitStrip(getTex("player/sword_left.png"), 6));
+        playerFrames.put("swordRight", splitStrip(getTex("player/sword_right.png"), 6));
+    }
+
+    private TextureRegion[] getEnemyStrip(String type, String state) {
+        String key = type + "_" + state;
+        if (enemyAnimCache.containsKey(key)) {
+            return enemyAnimCache.get(key);
+        }
+        Array<TextureAtlas.AtlasRegion> found = enemyAtlas.findRegions(key);
+        if (found == null || found.size == 0) {
+            enemyAnimCache.put(key, null);
+            return null;
+        }
+        TextureRegion[] regions = found.toArray(TextureRegion.class);
+        enemyAnimCache.put(key, regions);
+        return regions;
+    }
+
+    private void loadEnemyAnimations(Enemy e) {
+        e.walkR = getEnemyStrip(e.type, "walkR");
+        e.walkL = getEnemyStrip(e.type, "walkL");
+        e.attackR = getEnemyStrip(e.type, "attackR");
+        e.attackL = getEnemyStrip(e.type, "attackL");
+        e.die = getEnemyStrip(e.type, "die");
+        if (e.walkL == null) e.walkL = e.walkR;
+        if (e.attackL == null) e.attackL = e.attackR;
+    }
+
+    private void beginLevel(int n) {
+        level = n;
+        enemies.clear();
+        defeatedThisLevel.clear();
+        for (Door d : doors) {
+            d.open = 0f;
+            d.opening = false;
+        }
+        int[] playerStart = nearestWalkable(SPAWNS[level][0], SPAWNS[level][1]);
+        px = playerStart[0] * TILE + 8f;
+        py = playerStart[1] * TILE + 8f;
+
+        for (int[] p : ENEMY_SPAWNS[level]) {
+            spawnEnemy(KEYS[level], p[0], p[1], false);
+        }
+        reinforcementsInCurrentLevel = pendingEnemyReinforcements.size();
+        for (String type : pendingEnemyReinforcements) {
+            spawnEnemy(type, -1, -1, true);
+        }
+        pendingEnemyReinforcements.clear();
+        stageBanner = 2.3f;
+        gameOver = false;
+        updateCamera(true);
+    }
+
+    private void spawnEnemy(String type, int preferredX, int preferredY, boolean reinforcement) {
+        int sx = -1, sy = -1;
+        if (!reinforcement) {
+            int[] safe = nearestWalkable(preferredX, preferredY);
+            sx = safe[0];
+            sy = safe[1];
+        } else {
+            int[] area = AREAS[level];
+            int minX = Math.max(0, area[0]);
+            int maxX = Math.min(mapWidth - 1, area[0] + area[2]);
+            int minY = Math.max(0, area[1]);
+            int maxY = Math.min(mapHeight - 1, area[1] + area[3]);
+            for (int attempt = 0; attempt < 700; attempt++) {
+                int x = minX + random.nextInt(Math.max(1, maxX - minX + 1));
+                int y = minY + random.nextInt(Math.max(1, maxY - minY + 1));
+                float wx = x * TILE + 8f;
+                float wy = y * TILE + 8f;
+                if (!canStand(wx, wy) || Math.hypot(wx - px, wy - py) < 100.0) continue;
+                boolean crowded = false;
+                for (Enemy other : enemies) {
+                    if (Math.hypot(wx - other.x, wy - other.y) < 48.0) {
+                        crowded = true;
+                        break;
+                    }
+                }
+                if (!crowded) {
+                    sx = x;
+                    sy = y;
+                    break;
+                }
+            }
+            if (sx < 0) {
+                int[] safe = nearestWalkable(SPAWNS[level][0] + 3, SPAWNS[level][1] + 3);
+                sx = safe[0];
+                sy = safe[1];
+            }
+        }
+        Enemy enemy = new Enemy(type, sx * TILE + 8f, sy * TILE + 8f);
+        loadEnemyAnimations(enemy);
+        enemies.add(enemy);
+    }
+
+    private boolean inDoor(float x, float y) {
+        for (Door d : doors) {
+            if (d.open < 0.96f && x + 6f > d.x && x - 6f < d.x + d.w && y + 3f > d.y && y - 5f < d.y + d.h) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean canStand(float x, float y) {
+        int tx = (int) Math.floor(x / TILE);
+        int ty = (int) Math.floor(y / TILE);
+        if (tx < 0 || ty < 0 || tx >= mapWidth || ty >= mapHeight) return false;
+        if (!floor[tx][ty] || wall[tx][ty]) return false;
+        return !inDoor(x, y);
+    }
+
+    private int[] nearestWalkable(int tx, int ty) {
+        int[] area = AREAS[level];
+        int bestX = tx, bestY = ty;
+        double best = Double.MAX_VALUE;
+        int minX = Math.max(0, area[0]);
+        int maxX = Math.min(mapWidth - 1, area[0] + area[2]);
+        int minY = Math.max(0, area[1]);
+        int maxY = Math.min(mapHeight - 1, area[1] + area[3]);
+        for (int y = minY; y <= maxY; y++) {
+            for (int x = minX; x <= maxX; x++) {
+                float cx = x * TILE + 8f;
+                float cy = y * TILE + 8f;
+                if (canStand(cx, cy)) {
+                    double d = (x - tx) * (double) (x - tx) + (y - ty) * (double) (y - ty);
+                    if (d < best) {
+                        best = d;
+                        bestX = x;
+                        bestY = y;
+                    }
+                }
+            }
+        }
+        return new int[]{bestX, bestY};
+    }
+
+    private void setZoom(float value) {
+        zoom = Math.max(0.65f, Math.min(2.25f, value));
+        updateCamera(false);
+    }
+
+    private void updateCamera(boolean snap) {
+        float visibleW = worldViewport.getWorldWidth() / zoom;
+        float visibleH = worldViewport.getWorldHeight() / zoom;
+        float targetX = px - visibleW / 2f;
+        float targetY = py - visibleH / 2f;
+        targetX = Math.max(0f, Math.min(Math.max(0f, mapWidth * TILE - visibleW), targetX));
+        targetY = Math.max(0f, Math.min(Math.max(0f, mapHeight * TILE - visibleH), targetY));
+        if (snap) {
+            cameraX = targetX;
+            cameraY = targetY;
+        } else {
+            cameraX += (targetX - cameraX) * 0.22f;
+            cameraY += (targetY - cameraY) * 0.22f;
+        }
+        worldCam.zoom = 1f / zoom;
+        worldCam.position.set(cameraX + visibleW / 2f, worldHeight - (cameraY + visibleH / 2f), 0f);
+        worldCam.update();
+    }
+
+    private float toWorldY(float topY, float h) {
+        return worldHeight - topY - h;
+    }
+
+    private void updateGame(float dt) {
+        if (Gdx.input.isKeyJustPressed(Keys.ESCAPE)) {
+            openPauseMenu();
+            return;
+        }
+        if (Gdx.input.isKeyJustPressed(Keys.EQUALS) || Gdx.input.isKeyJustPressed(Keys.PLUS)
+            || Gdx.input.isKeyJustPressed(Keys.NUMPAD_ADD)) {
+            setZoom(zoom * 1.12f);
+        }
+        if (Gdx.input.isKeyJustPressed(Keys.MINUS) || Gdx.input.isKeyJustPressed(Keys.NUMPAD_SUBTRACT)) {
+            setZoom(zoom / 1.12f);
+        }
+
+        if (gameOver || gameWon) {
+            if (Gdx.input.isKeyJustPressed(Keys.R)) {
+                pendingEnemyReinforcements.clear();
+                defeatedThisLevel.clear();
+                reinforcementsInCurrentLevel = 0;
+                playerHp = 100f;
+                gameWon = false;
+                gameOver = false;
+                beginLevel(0);
+            }
+            return;
+        }
+
+        if (stageBanner > 0f) stageBanner = Math.max(0f, stageBanner - dt);
+        if (playerHurtTime > 0f) playerHurtTime = Math.max(0f, playerHurtTime - dt);
+        if (attackCooldown > 0f) attackCooldown = Math.max(0f, attackCooldown - dt);
+        if (playerAttackTime > 0f) playerAttackTime = Math.max(0f, playerAttackTime - dt);
+        if (trapDamageCooldown > 0f) trapDamageCooldown = Math.max(0f, trapDamageCooldown - dt);
+
+        boolean up = Gdx.input.isKeyPressed(Keys.W) || Gdx.input.isKeyPressed(Keys.UP);
+        boolean down = Gdx.input.isKeyPressed(Keys.S) || Gdx.input.isKeyPressed(Keys.DOWN);
+        boolean left = Gdx.input.isKeyPressed(Keys.A) || Gdx.input.isKeyPressed(Keys.LEFT);
+        boolean right = Gdx.input.isKeyPressed(Keys.D) || Gdx.input.isKeyPressed(Keys.RIGHT);
+
+        float dx = (right ? 1f : 0f) - (left ? 1f : 0f);
+        float dy = (down ? 1f : 0f) - (up ? 1f : 0f);
+        float len = (float) Math.hypot(dx, dy);
+        if (len > 0f) {
+            dx /= len;
+            dy /= len;
+            if (Math.abs(dx) > Math.abs(dy)) {
+                facing = dx < 0f ? 2 : 3;
+            } else {
+                facing = dy < 0f ? 0 : 1;
+            }
+            playerAnimTime += dt;
+        }
+
+        float speed = 2.35f * 60f * dt;
+        if (canStand(px + dx * speed, py)) px += dx * speed;
+        if (canStand(px, py + dy * speed)) py += dy * speed;
+
+        int playerTileX = (int) Math.floor(px / TILE);
+        int playerTileY = (int) Math.floor(py / TILE);
+        long playerTileKey = (((long) playerTileY) << 32) | (playerTileX & 0xffffffffL);
+        if (trapTiles.contains(playerTileKey) && trapDamageCooldown <= 0f) {
+            playerHp = Math.max(0f, playerHp - 8f);
+            trapDamageCooldown = 48f / 60f;
+            playerHurtTime = 12f / 60f;
+            if (playerHp <= 0f) gameOver = true;
+        }
+
+        if (Gdx.input.isKeyPressed(Keys.SPACE) && attackCooldown <= 0f) {
+            attackCooldown = 28f / 60f;
+            playerAttackTime = 0.42f;
+            for (Enemy e : enemies) {
+                if (!e.dead && !e.dying && Math.hypot(e.x - px, e.y - py) < 57.0) {
+                    e.hp -= 42f;
+                    e.hitFlash = 7f / 60f;
+                    if (e.hp <= 0f) {
+                        e.dying = true;
+                        e.deathTime = 0f;
+                        e.action = "die";
+                        defeatedThisLevel.add(e.type);
+                        WikiProgress.unlock(e.type);
+                    }
+                }
+            }
+        }
+
+        if (Gdx.input.isKeyJustPressed(Keys.E)) {
+            Door nearest = null;
+            double best = 64.0;
+            for (Door d : doors) {
+                double dist = Math.hypot(d.x + d.w / 2f - px, d.y + d.h / 2f - py);
+                if (dist < best && d.open < 1f) {
+                    best = dist;
+                    nearest = d;
+                }
+            }
+            if (nearest != null) nearest.opening = true;
+        }
+
+        for (Door d : doors) {
+            if (d.opening) {
+                d.open = Math.min(1f, d.open + dt / 0.78f);
+            }
+        }
+
+        float enemySpeed = 0.72f * 60f * dt;
+        for (Enemy e : enemies) {
+            if (e.dead) continue;
+            e.animTime += dt;
+            if (e.hitFlash > 0f) e.hitFlash = Math.max(0f, e.hitFlash - dt);
+            if (e.attackCooldown > 0f) e.attackCooldown = Math.max(0f, e.attackCooldown - dt);
+
+            if (e.dying) {
+                e.deathTime += dt;
+                int dieLen = e.die == null ? 0 : e.die.length;
+                if (dieLen == 0 || e.deathTime > Math.max(0.65f, dieLen * 0.075f)) {
+                    e.dead = true;
+                }
+                continue;
+            }
+
+            double dist = Math.hypot(px - e.x, py - e.y);
+            if (!e.alerted && dist < 190.0) {
+                e.alerted = true;
+                e.alertTime = 2.0f;
+            }
+            if (e.alerted && e.alertTime > 0f) {
+                e.alertTime = Math.max(0f, e.alertTime - dt);
+                e.action = "walk";
+                e.facingLeft = px < e.x;
+            } else if (e.alerted && dist < 230.0) {
+                e.facingLeft = px < e.x;
+                if (dist > 34.0) {
+                    e.action = "walk";
+                    float vx = (px - e.x) / (float) dist;
+                    float vy = (py - e.y) / (float) dist;
+                    float nx = e.x + vx * enemySpeed;
+                    float ny = e.y + vy * enemySpeed;
+                    if (canStand(nx, ny)) {
+                        e.x = nx;
+                        e.y = ny;
+                    }
+                } else {
+                    e.action = "attack";
+                    if (e.attackCooldown <= 0f) {
+                        playerHp -= e.type.equals("kapre") ? 13f : 9f;
+                        e.attackCooldown = 58f / 60f;
+                        playerHurtTime = 12f / 60f;
+                        if (playerHp <= 0f) {
+                            playerHp = 0f;
+                            gameOver = true;
+                        }
+                    }
+                }
+            } else {
+                e.action = "walk";
+            }
+        }
+
+        enemies.removeIf(e -> e.dead);
+        if (enemies.isEmpty()) {
+            if (level < TYPES.length - 1) {
+                pendingEnemyReinforcements.addAll(defeatedThisLevel);
+                beginLevel(level + 1);
+            } else {
+                gameWon = true;
+            }
+        }
+
+        updateCamera(false);
+    }
+
+    private void openPauseMenu() {
+        if (game instanceof DungeonBound) {
+            DungeonBound db = (DungeonBound) game;
+            db.setScreen(PauseMenuScreen.create(
+                db,
+                () -> db.setScreen(this, false),
+                () -> db.setScreen(this, false),
+                () -> db.setScreen(this, false),
+                () -> {
+                    dispose();
+                    db.setScreen(new StartMenuScreen(db));
+                }
+            ), false);
+        } else {
+            game.setScreen(new StartMenuScreen(game));
+            dispose();
+        }
+    }
+
+    private TextureRegion getTileRegion(int id) {
+        TextureRegion r = tileRegions.get(id);
+        if (r != null) return r;
+        int sx = (id % 8) * TILE;
+        int sy = (id / 8) * TILE;
+        if (sx + TILE <= tileAtlas.getWidth() && sy + TILE <= tileAtlas.getHeight()) {
+            r = new TextureRegion(tileAtlas, sx, sy, TILE, TILE);
+            tileRegions.put(id, r);
+            return r;
+        }
+        return null;
+    }
+
+    private TextureRegion getAnimFrame(TextureRegion[] frames, float time, float fps) {
+        if (frames == null || frames.length == 0) return null;
+        int idx = ((int) (time * fps)) % frames.length;
+        return frames[idx];
+    }
+
+    private void drawRect(float x, float y, float w, float h, Color color) {
+        batch.setColor(color);
+        batch.draw(pixelTex, x, y, w, h);
+        batch.setColor(Color.WHITE);
+    }
+
     @Override
     public void show() {
-        Gdx.input.setInputProcessor(buttons); // the attack buttons listen to touches
-    }
-
-    @Override
-    public void hide() {
-        if (Gdx.input.getInputProcessor() == buttons) Gdx.input.setInputProcessor(null);
-    }
-
-    @Override
-    public void resize(int width, int height) {
-        viewport.update(width, height);
-        hudViewport.update(width, height, true);
-        float hudW = hudViewport.getWorldWidth();
-        float hudH = hudViewport.getWorldHeight();
-        joystick.layout(hudH);
-        playerHud.layout(hudW, hudH);
-        inventory.layout(hudW, hudH, playerHud.getProfileRect()); // the bag icon sits below the profile
-        buttons.layout(hudW, hudH);
+        Gdx.input.setInputProcessor(new InputAdapter() {
+            @Override
+            public boolean scrolled(float amountX, float amountY) {
+                setZoom(zoom * (amountY < 0f ? 1.12f : 1f / 1.12f));
+                return true;
+            }
+        });
     }
 
     @Override
     public void render(float delta) {
         float dt = Math.min(delta, 1f / 30f);
+        updateGame(dt);
 
-        // ---- ESC: close the inventory if it is open, otherwise open the pause menu ----
-        boolean escPressed = Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE);
-        boolean inventoryWasOpen = inventory.isOpen();
+        Gdx.gl.glClearColor(0f, 0f, 0f, 1f);
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
 
-        // ---- input: inventory, on-screen joystick + keyboard (arrows / WASD) ----
-        inventory.update(hudViewport);
-        boolean swordTap = buttons.pollSword();
-        boolean fireTap = buttons.pollFire();
-        fireCooldown = Math.max(0f, fireCooldown - dt);
+        // ---- World pass
+        worldViewport.apply();
+        batch.setProjectionMatrix(worldCam.combined);
+        batch.begin();
 
-        if (escPressed && !inventoryWasOpen) {
-            openPauseMenu();
-            return;
-        }
-
-        float dx = 0f;
-        float dy = 0f;
-        if (!inventory.isOpen()) { // the game pauses while the inventory is open
-            Vector2 stick = joystick.update(hudViewport);
-            dx = stick.x;
-            dy = stick.y;
-            if (Gdx.input.isKeyPressed(Input.Keys.LEFT) || Gdx.input.isKeyPressed(Input.Keys.A)) dx -= 1f;
-            if (Gdx.input.isKeyPressed(Input.Keys.RIGHT) || Gdx.input.isKeyPressed(Input.Keys.D)) dx += 1f;
-            if (Gdx.input.isKeyPressed(Input.Keys.UP) || Gdx.input.isKeyPressed(Input.Keys.W)) dy += 1f;
-            if (Gdx.input.isKeyPressed(Input.Keys.DOWN) || Gdx.input.isKeyPressed(Input.Keys.S)) dy -= 1f;
-            if (Gdx.input.isKeyJustPressed(Input.Keys.SPACE) || swordTap) player.attack();
-            if ((Gdx.input.isKeyJustPressed(Input.Keys.F) || fireTap) && fireCooldown <= 0f && !player.isBusy()) {
-                player.cast();
-                fireballs.shoot(player.x, player.y, player.facingX(), player.facingY());
-                fireCooldown = FIRE_COOLDOWN;
+        for (Tile t : drawTiles) {
+            TextureRegion r = getTileRegion(t.id);
+            if (r != null) {
+                batch.draw(r, t.x * TILE, toWorldY(t.y * TILE, TILE), TILE, TILE);
             }
         }
 
-        // ---- update ----
-        player.update(dt, dx, dy, map);
-        fireballs.update(dt, map);
+        int[] area = AREAS[level];
+        drawRect(area[0] * TILE, toWorldY((area[1] + area[3]) * TILE, 0f),
+            area[2] * TILE, area[3] * TILE, new Color(230f / 255f, 180f / 255f, 80f / 255f, 18f / 255f));
 
-        // camera follows the player but never shows outside the map
-        float halfW = viewport.getWorldWidth() / 2f;
-        float halfH = viewport.getWorldHeight() / 2f;
-        camera.position.x = map.width <= halfW * 2 ? map.width / 2f : MathUtils.clamp(player.x, halfW, map.width - halfW);
-        camera.position.y = map.height <= halfH * 2 ? map.height / 2f : MathUtils.clamp(player.y + 10f, halfH, map.height - halfH);
-        camera.update();
+        for (Door d : doors) {
+            int idx = Math.min(doorFrames.length - 1, (int) (d.open * (doorFrames.length - 1) + 0.0001f));
+            batch.draw(doorFrames[idx], d.x, toWorldY(d.y, 57f), 48f, 57f);
+        }
 
-        // ---- draw ----
-        ScreenUtils.clear(0.13f, 0.13f, 0.13f, 1f);
-        viewport.apply();
-        batch.setProjectionMatrix(camera.combined);
-        batch.begin();
-        map.render(batch);
-        player.render(batch);
-        fireballs.render(batch);
+        for (Enemy e : enemies) {
+            if (e.dead) continue;
+            boolean flip = e.facingLeft;
+            TextureRegion[] anim;
+            if (e.dying) anim = e.die;
+            else if (e.action.equals("attack")) anim = flip ? e.attackL : e.attackR;
+            else anim = flip ? e.walkL : e.walkR;
+
+            TextureRegion im = getAnimFrame(anim, e.dying ? e.deathTime : e.animTime, e.dying ? 13f : 11f);
+            float size = e.type.equals("kapre") ? 58f : 48f;
+            float drawW = size;
+            float drawH = size;
+            if (im != null) {
+                float ratio = (float) im.getRegionWidth() / Math.max(1, im.getRegionHeight());
+                drawW = size * Math.max(0.7f, Math.min(1.35f, ratio));
+            }
+            if (e.hitFlash > 0f && !e.dying) {
+                batch.setColor(1f, 0.7f, 0.7f, 1f);
+            }
+            if (im != null) {
+                boolean mirror = flip && (anim == e.walkR || anim == e.attackR);
+                float dx = e.x - drawW / 2f;
+                float dy = toWorldY(e.y - drawH + 7f, drawH);
+                if (mirror) {
+                    batch.draw(im, dx + drawW, dy, -drawW, drawH);
+                } else {
+                    batch.draw(im, dx, dy, drawW, drawH);
+                }
+            }
+            batch.setColor(Color.WHITE);
+
+            if (!e.dying) {
+                float barX = e.x - 19f;
+                float barY = toWorldY(e.y - size / 2f - 8f, 5f);
+                drawRect(barX, barY, 38f, 5f, new Color(25f / 255f, 15f / 255f, 15f / 255f, 1f));
+                drawRect(barX, barY, 38f * Math.max(0f, e.hp / e.maxHp), 5f,
+                    new Color(190f / 255f, 45f / 255f, 38f / 255f, 1f));
+                if (e.alerted && e.alertTime > 0f) {
+                    smallFont.setColor(new Color(1f, 220f / 255f, 90f / 255f, 1f));
+                    smallFont.draw(batch, "!", e.x - 2f, toWorldY(e.y - size / 2f - 24f, 0f));
+                }
+            }
+        }
+
+        TextureRegion[] pAnim = playerAttackTime > 0f
+            ? playerFrames.get(facing == 2 ? "swordLeft" : "swordRight")
+            : playerFrames.get(facing == 0 ? "up" : facing == 1 ? "down" : facing == 2 ? "left" : "right");
+        TextureRegion pFrame = getAnimFrame(pAnim, playerAnimTime, 10f);
+        if (pFrame != null) {
+            float pw = playerAttackTime > 0f ? 50f : (facing == 1 ? 38f : 34f);
+            float ph = playerAttackTime > 0f ? 50f : (facing == 1 ? 54f : 46f);
+            if (playerHurtTime > 0f) batch.setColor(1f, 0.55f, 0.55f, 1f);
+            batch.draw(pFrame, px - pw / 2f, toWorldY(py - ph + 7f, ph), pw, ph);
+            batch.setColor(Color.WHITE);
+        }
+
         batch.end();
 
+        // ---- HUD pass
         hudViewport.apply();
-        shape.setProjectionMatrix(hudCamera.combined);
-        joystick.render(shape);
-        batch.setProjectionMatrix(hudCamera.combined);
-        buttons.render(shape, batch, player.isAttacking(), fireCooldown / FIRE_COOLDOWN);
-        playerHud.render(shape, batch, player);
-        inventory.render(shape, batch, hudViewport.getWorldWidth(), hudViewport.getWorldHeight());
+        batch.setProjectionMatrix(hudCam.combined);
+        batch.begin();
+        drawHud();
+        batch.end();
     }
 
-    /** Shows the team's pause menu. This screen stays alive (not disposed) while the menu is open. */
-    private void openPauseMenu() {
-        final GameScreen self = this;
-        Runnable resume = () -> game.setScreen(self);
-        Runnable items = () -> {
-            inventory.openPanel();
-            game.setScreen(self);
-        };
-        // "Creature Lore": leaves the dungeon and opens the wiki (its back button goes to the Start Menu).
-        Runnable lore = () -> {
-            game.setScreen(new WikiMenuScreen(game));
-            self.dispose();
-        };
-        Runnable backToStart = () -> {
-            game.setScreen(new StartMenuScreen(game));
-            self.dispose();
-        };
-        game.setScreen(PauseMenuScreen.create(game, resume, items, lore, backToStart), false);
+    private void drawHud() {
+        float hh = hudViewport.getWorldHeight();
+        float hw = hudViewport.getWorldWidth();
+
+        drawRect(12f, hh - 102f, 470f, 92f, new Color(12f / 255f, 10f / 255f, 12f / 255f, 220f / 255f));
+        hudFont.setColor(new Color(1f, 225f / 255f, 180f / 255f, 1f));
+        hudFont.draw(batch, "MGA NILALANG  •  LEVEL " + (level + 1) + " / 5  •  " + TYPES[level], 24f, hh - 22f);
+
+        drawRect(24f, hh - 56f, 180f, 12f, new Color(65f / 255f, 35f / 255f, 35f / 255f, 1f));
+        drawRect(24f, hh - 56f, 180f * Math.max(0f, playerHp / 100f), 12f,
+            new Color(190f / 255f, 52f / 255f, 48f / 255f, 1f));
+
+        hudFont.setColor(Color.WHITE);
+        hudFont.draw(batch, "HP " + (int) playerHp + "%     Enemies: " + enemies.size(), 216f, hh - 44f);
+
+        hudFont.setColor(new Color(230f / 255f, 205f / 255f, 150f / 255f, 1f));
+        hudFont.draw(batch, "Returning hostile reinforcements: " + reinforcementsInCurrentLevel, 24f, hh - 72f);
+
+        smallFont.setColor(new Color(245f / 255f, 235f / 255f, 215f / 255f, 1f));
+        smallFont.draw(batch, "WASD: Move   SPACE: Attack   E: Door   Wheel / +/-: Zoom   ESC: Pause", 495f, hh - 20f);
+
+        if (stageBanner > 0f) {
+            drawRect(hw / 2f - 170f, hh - 152f, 340f, 62f, new Color(0f, 0f, 0f, 175f / 255f));
+            String bMsg = "LEVEL " + (level + 1) + " — " + TYPES[level].toUpperCase(Locale.ROOT);
+            bannerFont.setColor(new Color(1f, 222f / 255f, 160f / 255f, 1f));
+            layout.setText(bannerFont, bMsg);
+            bannerFont.draw(batch, bMsg, (hw - layout.width) / 2f, hh - 112f);
+        }
+
+        if (gameOver || gameWon) {
+            drawRect(0f, 0f, hw, hh, new Color(0f, 0f, 0f, 210f / 255f));
+            String msg = gameWon ? "DUNGEON CLEARED" : "YOU HAVE FALLEN";
+            titleFont.setColor(Color.WHITE);
+            layout.setText(titleFont, msg);
+            titleFont.draw(batch, msg, (hw - layout.width) / 2f, hh / 2f + 40f);
+
+            String sub = gameWon
+                ? "You survived all five enemy stages. Press R to play again."
+                : "Press R to restart from Level 1.";
+            hudFont.setColor(Color.WHITE);
+            layout.setText(hudFont, sub);
+            hudFont.draw(batch, sub, (hw - layout.width) / 2f, hh / 2f - 10f);
+        }
+    }
+
+    @Override
+    public void resize(int w, int h) {
+        worldViewport.update(w, h, false);
+        hudViewport.update(w, h, true);
+        updateCamera(true);
     }
 
     @Override public void pause() {}
     @Override public void resume() {}
 
     @Override
+    public void hide() {
+        Gdx.input.setInputProcessor(null);
+    }
+
+    @Override
     public void dispose() {
         if (disposed) return;
         disposed = true;
         batch.dispose();
-        shape.dispose();
-        map.dispose();
-        player.dispose();
-        inventory.dispose();
+        pixelTex.dispose();
         hudFont.dispose();
-        fireballs.dispose();
-        buttons.dispose();
-        if (assets != null) assets.dispose();
+        smallFont.dispose();
+        bannerFont.dispose();
+        titleFont.dispose();
+        for (Texture t : ownedTextures) {
+            t.dispose();
+        }
+        ownedTextures.clear();
+        if (ownedEnemyAtlas != null) {
+            ownedEnemyAtlas.dispose();
+            ownedEnemyAtlas = null;
+        }
+        if (assets != null) {
+            assets.dispose();
+        }
     }
 }

@@ -18,7 +18,8 @@ apply plugin: "io.github.fourlastor.construo"
 
 import io.github.fourlastor.construo.Target
 
-sourceSets.main.resources.srcDirs += [ rootProject.file('assets').path ]
+// Assets are read directly from workingDir (`assets/`) during `:lwjgl3:run` and packaged only in `jar`.
+// Keeping `assets/` out of `sourceSets.main.resources` avoids copying ~39 MB on every `:lwjgl3:classes` build.
 
 application {
     mainClass = "com.dungeonbound.game.lwjgl3.Lwjgl3Launcher"
@@ -40,7 +41,6 @@ dependencies {
     implementation project(":core")
     implementation "com.badlogicgames.gdx:gdx-tools:$gdxVersion"
 
-    // implementation "com.badlogicgames.gdx:gdx-tools:$gdxVersion"
     if (enableGraalNative == 'true') {
         implementation "io.github.berstanio:gdx-svmhelper-backend-lwjgl3:$graalHelperVersion"
         implementation "io.github.berstanio:gdx-svmhelper-extension-freetype:$graalHelperVersion"
@@ -71,6 +71,10 @@ jar {
     from {
         configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
     }
+    from(rootProject.file('assets')) {
+        exclude 'enemies/*/**'
+        exclude 'ui/anim/wakwak/**', 'ui/anim/fireflies/**', 'ui/anim/torch/**', 'ui/anim/moonhalo/**'
+    }
     exclude('META-INF/INDEX.LIST', 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA')
     manifest {
         attributes(
@@ -85,51 +89,44 @@ jar {
     }
 }
 
-
 // -------------------------------------------------
-// Texture atlas packing task (runs libGDX TexturePacker)
+// Texture atlas packing tasks (libGDX TexturePacker)
 // -------------------------------------------------
-// import com.badlogic.gdx.tools.texturepacker.TexturePacker
 
-// Separate texture packing tasks for each animation
+// UI animation atlases
 task packWakwak(type: JavaExec) {
-// duplicate packAllAtlases removed
     description = "Pack wakwak animation atlas"
     classpath = sourceSets.main.runtimeClasspath
     mainClass.set("com.badlogic.gdx.tools.texturepacker.TexturePacker")
-    args = ["${project.rootDir}/assets/ui/anim/wakwak", "${project.rootDir}/assets/ui/anim", "packed_wakwak"]
+    args = ["${rootProject.rootDir}/assets/ui/anim/wakwak", "${rootProject.rootDir}/assets/ui/anim", "packed_wakwak"]
 }
 
 task packFireflies(type: JavaExec) {
-// duplicate packAllAtlases removed
     description = "Pack fireflies animation atlas"
     classpath = sourceSets.main.runtimeClasspath
     mainClass.set("com.badlogic.gdx.tools.texturepacker.TexturePacker")
-    args = ["${project.rootDir}/assets/ui/anim/fireflies", "${project.rootDir}/assets/ui/anim", "packed_fireflies"]
+    args = ["${rootProject.rootDir}/assets/ui/anim/fireflies", "${rootProject.rootDir}/assets/ui/anim", "packed_fireflies"]
 }
 
 task packTorch(type: JavaExec) {
-// duplicate packAllAtlases removed
     description = "Pack torch animation atlas"
     classpath = sourceSets.main.runtimeClasspath
     mainClass.set("com.badlogic.gdx.tools.texturepacker.TexturePacker")
-    args = ["${project.rootDir}/assets/ui/anim/torch", "${project.rootDir}/assets/ui/anim", "packed_torch"]
+    args = ["${rootProject.rootDir}/assets/ui/anim/torch", "${rootProject.rootDir}/assets/ui/anim", "packed_torch"]
 }
 
 task packMoonhalo(type: JavaExec) {
-// duplicate packAllAtlases removed
     description = "Pack moonhalo animation atlas"
     classpath = sourceSets.main.runtimeClasspath
     mainClass.set("com.badlogic.gdx.tools.texturepacker.TexturePacker")
-    args = ["${project.rootDir}/assets/ui/anim/moonhalo", "${project.rootDir}/assets/ui/anim", "packed_moonhalo"]
+    args = ["${rootProject.rootDir}/assets/ui/anim/moonhalo", "${rootProject.rootDir}/assets/ui/anim", "packed_moonhalo"]
 }
 
+// Master task for all atlases (UI animations)
 task packAllAtlases {
-// duplicate packAllAtlases removed
-    description = "Run all texture packing tasks"
+    description = "Run all texture packing tasks (UI animations)"
     dependsOn packWakwak, packTorch, packMoonhalo
 }
-
 
 tasks.register("jarMac") {
     dependsOn "jar"

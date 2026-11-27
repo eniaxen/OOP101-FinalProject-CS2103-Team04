@@ -4,10 +4,10 @@ import com.badlogic.gdx.Game;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.assets.AssetManager;
+import com.badlogic.gdx.assets.loaders.TextureLoader;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.maps.tiled.TiledMap;
-import com.badlogic.gdx.maps.tiled.TmxMapLoader;
+import com.badlogic.gdx.graphics.g2d.TextureAtlas;
 import com.badlogic.gdx.scenes.scene2d.Action;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
@@ -98,11 +98,23 @@ public class LoadingScreen implements Screen {
 
     /** DITO ILAGAY lahat ng kailangan ng GameScreen. Dapat umiiral ang bawat file sa assets/. */
     private void queueAssets() {
-        assets.setLoader(TiledMap.class, new TmxMapLoader());
-        // assets.load("maps/level1.tmx", TiledMap.class);
-        // assets.load("sprites/player.png", Texture.class);
-        // assets.load("sprites/enemies.atlas", TextureAtlas.class);
-        // assets.load("sfx/hit.ogg", Sound.class);
+        TextureLoader.TextureParameter nearest = new TextureLoader.TextureParameter();
+        nearest.minFilter = Texture.TextureFilter.Nearest;
+        nearest.magFilter = Texture.TextureFilter.Nearest;
+
+        assets.load("map/tiles.png", Texture.class, nearest);
+        assets.load("map/DoorAnimation.png", Texture.class, nearest);
+
+        String[] playerStrips = {
+            "player/walk_down.png", "player/walk_up.png",
+            "player/walk_left.png", "player/walk_right.png",
+            "player/sword_left.png", "player/sword_right.png"
+        };
+        for (String p : playerStrips) {
+            assets.load(p, Texture.class, nearest);
+        }
+
+        assets.load("enemies/enemies.atlas", TextureAtlas.class);
     }
 
     /** Inaayos ang posisyon at laki ng lahat ng layer ayon sa kasalukuyang laki ng virtual screen. */

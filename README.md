@@ -1,55 +1,15 @@
-
-# Mga Nilalang — Filipino Folklore Dungeon
-
-A Java 17+ Swing game built from the supplied `map.json`, `spritesheet.png`, player sprite strips, and `EnemiesAnimation.zip`.
-
-## Run on Windows
-Open PowerShell in this folder and run:
-
-```powershell
-gradle run
-```
-
-If Gradle is installed in a custom folder, add its `bin` folder to the current PowerShell session first, for example:
-
-```powershell
-$env:Path += ";C:\Users\Lenovo\Documents\assets\Gradle\gradle-9.9.2\bin"
-gradle run
-```
-
-Java 17 or newer is required. Java 26 is supported by this source code when Gradle runs on it.
-
-## Controls
-- **WASD / Arrow keys** — walk
-- **Space** — sword attack
-- **E** — open the nearest nearby door
-- **Mouse wheel / + / -** — zoom in and out
-- **R** — restart after winning or dying
-
-## Five stages
-1. Tiyanak — starts in the smallest upper-left chamber (smallest active play area)
-2. Aswang — upper hall
-3. Tikbalang — west middle chamber
-4. Manananggal — east middle chamber
-5. Kapre — lower chamber
-
-Clear all enemies in a stage to add that creature to your allies and advance. Enemies wake when the player is close, chase, attack, and use their walk-left/right, attack, and dying animations from the supplied GIFs. Player and enemy movement is restricted to cells in the map base-floor layer. Feet colliders also block walls, furniture/prop layers, and traps; invalid legacy spawn points are moved to the nearest valid floor cell in that stage. The camera smoothly follows the player and clamps to the map edges at the selected zoom. Doors use the supplied nine-frame DoorAnimation.png strip and remain blocked until the opening animation finishes.
-
-## Asset preservation
-The newly supplied map.json and spritesheet.png are installed as the active map and tile atlas. The supplied DoorAnimation.png strip is installed as the runtime door animation. The original player and enemy ZIP archives are also retained, and the supplied `Player.java` is kept in `reference/` as-is. Extracted animation frames are additional runtime assets; they do not replace or delete the originals.
-
 # ⚔️ Dungeonbound: The Filipino Labyrinth
 
 > *Explore the maze. Fight the creatures of Philippine folklore. Learn their stories.*
 
-**🎮 Genre:** Dungeon crawler &nbsp;|&nbsp; **💻 Built with:** Java (GUI) &nbsp;|&nbsp; **👤 Mode:** Single-player, offline  
+**🎮 Genre:** Dungeon crawler &nbsp;|&nbsp; **💻 Built with:** Java (libGDX) &nbsp;|&nbsp; **👤 Mode:** Single-player, offline  
 **📚 Course:** OOP 101 &nbsp;|&nbsp; **👥 Team:** NPC (Team 4, CS-2103)
 
 ---
 
 ## About
 
-Dungeonbound is a single-player Java game with a graphical interface. Players explore randomly generated labyrinths, defeat enemies inspired by Philippine folklore, and earn coins to upgrade their character before facing a final boss.
+**Dungeonbound** is a single-player Java dungeon crawler built with **libGDX**. Players explore a five-stage dungeon, battle creatures inspired by Philippine folklore, unlock entries in the in-game Bestiary/Wiki, and survive returning reinforcements from earlier stages.
 
 There are plenty of dungeon and fantasy games, but few are built around Filipino culture and mythology. This project aims to be both a fun challenge and a way to introduce Filipino mythical creatures to players.
 
@@ -59,67 +19,64 @@ There are plenty of dungeon and fantasy games, but few are built around Filipino
 
 | Player | What they get |
 |---|---|
-| **Casual gamers & fantasy fans** | A dungeon adventure with exploration, combat, and resource management leading to a final boss. |
-| **Students & cultural enthusiasts** | An in-game wiki, story, and themed items that teach Filipino mythology and folklore. |
+| **Casual gamers & fantasy fans** | A five-stage dungeon adventure with exploration, real-time combat, animated doors, and escalating enemy encounters. |
+| **Students & cultural enthusiasts** | An in-game Bestiary/Wiki and lore pages in English and Tagalog that introduce Filipino mythical creatures. |
 
 ---
 
 ## Features
 
-**🔐 Accounts**
-Register and log in so your progress is saved.
+**🌐 Language Selection & Accounts**
+Choose between **Tagalog** and **English**, and log in or sign up so your Bestiary/Wiki unlocks and settings are saved per user.
 
-**🗺️ Labyrinth Exploration**
-Move through generated labyrinths with wall collision.
+**🗺️ Five-Stage Folklore Dungeon**
+Explore the tilemap dungeon with wall/floor collision, floor traps, and interactive animated doors:
+1. **Tiyanak** — smallest starting chamber
+2. **Aswang** — upper hall
+3. **Tikbalang** — west middle chamber
+4. **Manananggal** — east middle chamber
+5. **Kapre** — large lower chamber
 
-**👹 Folklore Enemies**
-Each enemy has its own stats and skills, and is placed randomly in the maze.
+**👹 Folklore Enemies & Reinforcements**
+Each creature has its own walk, attack, and death animations, plus an alert warning window (`!`) before chasing and attacking. Defeated enemies in earlier stages return as hostile reinforcements in later chambers.
 
-**🪙 Coins & Shop**
-Collect coins and loot, then spend them on HP, weapon damage, and skills.
-
-**📖 Game Wiki**
-Defeat a creature to unlock its entry and read about its place in Philippine folklore.
-
-**☠️ Final Boss**
-Conquer every labyrinth to face the boss. Lose and you can retry or end the game.
+**📖 Game Wiki (Bestiary)**
+Defeating a creature unlocks its card in the Bestiary so you can read its lore and stats.
 
 ---
 
 ## How the Game Flows
 
 ```
-Login / Register
+Language Select / Title Screen
       │
       ▼
-Enter the dungeon ──► Explore the labyrinth
+Start Menu (Play / Wiki / Settings / Exit)
       │
       ▼
-Battle enemies ──► Unlock wiki entries ──► Collect coins
+Loading Screen ──► Enter Dungeon (Stage 1: Tiyanak)
       │
       ▼
-Upgrade at the shop
+Battle Enemies ──► Unlock Wiki Entries ──► Open Doors (E)
       │
       ▼
-All labyrinths conquered?
+Clear Stage ──► Next Chamber (+ returning reinforcements)
+      │
+      ▼
+All 5 Stages Cleared?
    │              │
-   no             yes
+  lose           win
    │              │
    ▼              ▼
-Next labyrinth    Final boss
-                  │         │
-                 lose      win
-                  │         │
-          Retry / Game Over  Dungeon conquered
+Game Over (R)   Dungeon Cleared (R)
 ```
 
 ---
 
-
-## 🚀 How to Run the Game (Paano Patakbuhin)
+## 🚀 How to Run the Game
 
 ### System Requirements
-- **Java Development Kit (JDK):** Version 17 or higher
+- **Java Development Kit (JDK):** Version 17 or higher (Java 21/26 supported)
 - **Operating System:** Windows, macOS, or Linux
 
 ### Quick Start
@@ -131,36 +88,53 @@ git clone https://github.com/neonekiii/OOP101-FinalProject-CS2103-Team04.git
 cd OOP101-FinalProject-CS2103-Team04
 
 # 2. Run the game
-# On Windows (PowerShell / Command Prompt / Git Bash):
-.\gradlew.bat lwjgl3:run
+# On Windows (PowerShell / Command Prompt):
+.\gradlew.bat :lwjgl3:run
 
 # On macOS / Linux:
-./gradlew lwjgl3:run
+./gradlew :lwjgl3:run
 ```
 
 ### Controls (Mga Kontrol sa Laro)
 
-| Action | Keyboard | Mouse / Touch |
+| Action | Keyboard | Mouse |
 |---|---|---|
-| **Movement (Galaw)** | `W`, `A`, `S`, `D` or `Arrow Keys` | On-screen Joystick (bottom-left) |
-| **Attack (Atake)** | `SPACE` bar (Sword swing) | Screen / Space |
-| **Pause / Menu** | `ESC` key | In-game buttons |
-| **Navigate Menus** | `W`/`S` or `Up`/`Down`, `Enter` | Mouse Hover / Click |
+| **Movement (Galaw)** | `W`, `A`, `S`, `D` or `Arrow Keys` | — |
+| **Attack (Atake)** | `SPACE` (Sword swing) | — |
+| **Open Door (Buksan ang Pinto)** | `E` | — |
+| **Zoom In / Out** | `+` / `-` | Mouse Wheel |
+| **Pause / Menu** | `ESC` | In-game buttons |
+| **Restart (after Win / Game Over)** | `R` | — |
+| **Fullscreen Toggle** | `F11` | Settings menu |
 
 ---
 
+## Project Structure
+
+```
+OOP101-FinalProject-CS2103-Team04/
+├── assets/          # Game textures, tilemap, audio, fonts, UI, wiki, player & enemy atlases
+├── core/            # libGDX shared game logic, screens, UI, and audio management
+├── lwjgl3/          # Desktop launcher and packaging/atlas Gradle tasks
+├── gradle/          # Gradle wrapper files
+├── build.gradle
+├── settings.gradle
+├── gradle.properties
+└── README.md
+```
+
+---
 
 ## OOP Concepts
 
 | Concept | Where it applies |
 |---|---|
-| **Classes & Objects** | `Player`, `Enemy`, `Labyrinth`, `Shop`, `Account`. Every enemy in the maze is its own object. |
-| **Encapsulation** | HP, coins, level, weapon, skills, and progress are private and changed only through methods (e.g. spending coins on an upgrade). |
-| **Inheritance** | `Character` is the parent of `Player` and `Enemy`. Each folklore enemy extends `Enemy`. |
-| **Polymorphism** | `attack()` and `useSkill()` act differently per enemy type: fast but weak, or slow but heavy-hitting. |
-| **Abstraction** | The player picks "Upgrade Weapon"; the stat calculations stay hidden in the background. |
-| **Exception Handling** | Covers invalid logins, unavailable menu options, and spending more coins than owned. |
-| **Arrays / Lists** | Store the labyrinth layout, enemies, inventory, and wiki entries. |
+| **Classes & Objects** | `DungeonBound`, `GameScreen`, `WikiCreature`, `AudioManager`, `Ui`, and runtime `Enemy`/`Door`/`Tile` instances. |
+| **Encapsulation** | Player HP, enemy stats, cooldowns, preferences, and wiki unlock progress (`WikiProgress`) are managed through dedicated methods. |
+| **Inheritance & Polymorphism** | Screens implement libGDX `Screen` / extend `ScreenAdapter` (`TitleScreen`, `StartMenuScreen`, `LoadingScreen`, `GameScreen`, `PauseMenuScreen`, `WikiMenuScreen`), each overriding `render()`, `resize()`, and `dispose()`. |
+| **Abstraction** | `AudioManager`, `Ui`, and `AssetManager` hide low-level resource loading and rendering details behind clean helpers. |
+| **Exception Handling** | Handles missing/invalid resources, preferences parsing, and crash logging during screen transitions. |
+| **Collections** | `List`, `Map`, and `Set` store map layers, tiles, doors, active enemies, reinforcements, and cached animations. |
 
 ---
 
@@ -172,7 +146,6 @@ cd OOP101-FinalProject-CS2103-Team04
 | **Dhymple Norshe F. Carandang** ([@ajax1114](https://github.com/ajax1114)) | Enemy Designer, 2D Background Artist, Programmer, Documentor |
 | **Phoebe Leonides M. Dolor** ([@neonekiii](https://github.com/neonekiii)) | GUI & Item Designer, Programmer, Documentor |
 
-
 ---
 
 ## 🛡️ Intellectual Property & Assets Notice
@@ -183,4 +156,3 @@ All original pixel art, character animations, folklore monster cards, UI layouts
 - **Enemy Designs & 2D Backgrounds:** Created and owned by **Dhymple Norshe F. Carandang** ([@ajax1114](https://github.com/ajax1114)).
 
 > **Notice:** All rights reserved. Unauthorized reproduction, extraction, redistribution, or reuse of these creative assets in other academic submissions or third-party projects without explicit permission from the authors is strictly prohibited.
-
