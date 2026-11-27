@@ -320,6 +320,19 @@ public class GameScreen implements Screen {
             drawTiles.addAll(parsedLayers.get(li));
         }
 
+        // ---- Level 3 corridor runtime collision patch ----
+        // Connect Level 3's exit above door (28,19) both LEFT (x=20..27 -> Level 1)
+        // and RIGHT (x=30..39 -> Level 4 Manananggal chamber) along a 2-tile corridor (y=18..19).
+        // Keeping y=17 and y=20 blocked prevents walking into the black void above/below.
+        for (int bx = 20; bx <= 39; bx++) {
+            for (int by = 18; by <= 19; by++) {
+                if (bx >= 0 && by >= 0 && bx < mapWidth && by < mapHeight) {
+                    floor[bx][by] = true;
+                    wall[bx][by] = false;
+                }
+            }
+        }
+
         // Clear static wall collision on door cells; the Door objects handle blocking until opened.
         for (Door d : doors) {
             int x0 = (int) (d.x / TILE);
